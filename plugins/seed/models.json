@@ -1,0 +1,12 @@
+{
+  "qwen": {
+    "api_url": "/v1/chat/completions",
+    "models_url": "/seed/qwen-models.json",
+    "extra": {}
+  },
+  "openai": {
+    "api_url": "/v1/chat/completions",
+    "models_url": "/seed/openai-models.json",
+    "extra": {}
+  }
+}

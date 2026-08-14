@@ -1,6 +1,7 @@
 agent_main() {
-  INSTALL=$(CDPATH= cd "$(dirname "$SELF")" && pwd -P)
+  INSTALL=$(product_root)
   load_env
+  agent_ensure_init
   oneshot=0
   task=
   if [ "${1:-}" = --oneshot ]; then
@@ -20,7 +21,7 @@ agent_main() {
   mkdir -p "$ev"
   shell_init "$sess" "$PWD"
   set +e
-  run_loop "$(cabin_product_system)" "$task" "$sess" "$ev" "$AGENT_MAX_ROUNDS" 1
+  run_loop "$(product_system)" "$task" "$sess" "$ev" "$AGENT_MAX_ROUNDS" 1
   as=$?
   set -e
   if [ "$oneshot" -eq 1 ]; then
@@ -38,7 +39,7 @@ agent_main() {
       sess=$ev/session
       shell_init "$sess" "$PWD"
     fi
-    run_loop "$(cabin_product_system)" "$line" "$sess" "$ev" "$AGENT_MAX_ROUNDS" 1 || :
+    run_loop "$(product_system)" "$line" "$sess" "$ev" "$AGENT_MAX_ROUNDS" 1 || :
   done
   shell_stop "$sess" 2>/dev/null || :
 }
@@ -53,6 +54,11 @@ case ${1:-} in
   --parse-turn) shift; parse_turn "$1"; exit 0 ;;
   --llm) shift; llm_main "$@"; exit 0 ;;
   --edit) shift; edit_main "$@"; exit 0 ;;
+  --update)
+    INSTALL=$(product_root)
+    load_env
+    agent_update
+    exit 0 ;;
   --shell-init) shift; probe; shell_init "$1" "$2"; exit 0 ;;
   --shell) shift; shell_run "$1" "$2"; exit 0 ;;
   --shell-stop) shift; shell_stop "$1"; exit 0 ;;
@@ -61,6 +67,11 @@ case ${1:-} in
   --selftest) selftest; exit 0 ;;
   -h|--help) usage; exit 0 ;;
 esac
+
+if [ "$(basename "$0")" = agent ]; then
+  agent_main "$@"
+  exit 0
+fi
 
 INSTALL=.
 case ${1:-} in

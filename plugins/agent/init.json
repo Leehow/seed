@@ -1,0 +1,29 @@
+{
+  "prompt": "Initialize the machine index. The empty JSON tree is already at the Machine index path from the system message. Use shell and jq (or edit). For each key in system.tools, set present from command -v and path to that command when found. Record discovered skill directories in system.skills as {path, note} only — do not copy skill bodies. Put leftovers in system.other. Do not scan project source into the memory tree. When done, set ready to true and updated to a UTC timestamp. Then stop with no more tool_calls.",
+  "machine_tree": {
+    "ready": false,
+    "version": "1",
+    "updated": "",
+    "system": {
+      "tools": {
+        "sh": { "present": false, "path": "" },
+        "curl": { "present": false, "path": "" },
+        "jq": { "present": false, "path": "" },
+        "rg": { "present": false, "path": "" },
+        "git": { "present": false, "path": "" },
+        "python": { "present": false, "path": "" }
+      },
+      "skills": [],
+      "other": []
+    },
+    "ours": {
+      "plugins": ["init"]
+    }
+  },
+  "memory_tree": {
+    "ready": true,
+    "version": "1",
+    "notes": [],
+    "facts": []
+  }
+}

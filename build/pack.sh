@@ -16,6 +16,7 @@ need shell.sh
 need model.sh
 need loop.sh
 need install.sh
+need product.sh
 need agent.sh
 need prompts/product-system.txt
 need prompts/tools.json
@@ -51,6 +52,8 @@ HDR
   cat "$BUILD/loop.sh"
   printf '\n'
   cat "$BUILD/install.sh"
+  printf '\n'
+  cat "$BUILD/product.sh"
   printf '\n'
   cat "$BUILD/agent.sh"
   printf '\n'

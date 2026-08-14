@@ -1,0 +1,8 @@
+{
+  "version": "1",
+  "updated": "2026-08-14T00:00:00Z",
+  "required": {
+    "init": "init.json"
+  },
+  "optional": {}
+}

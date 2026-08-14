@@ -22,8 +22,10 @@ need() { command -v "$1" >/dev/null 2>&1 || die "need $1" 69; }
 write_env_file() {
   dest=$1
   umask 077
-  printf 'LLM_PROVIDER=%s\nLLM_API_URL=%s\nLLM_MODEL=%s\nLLM_API_KEY=%s\n' \
-    "$LLM_PROVIDER" "$LLM_API_URL" "$LLM_MODEL" "$LLM_API_KEY" > "$dest"
+  extra=${LLM_EXTRA:-'{}'}
+  printf 'LLM_PROVIDER=%s\nLLM_API_URL=%s\nLLM_MODEL=%s\nLLM_API_KEY=%s\nLLM_EXTRA=%s\n' \
+    "$LLM_PROVIDER" "$LLM_API_URL" "$LLM_MODEL" "$LLM_API_KEY" \
+    "$(printf '%s' "$extra" | jq -Rs .)" > "$dest"
   chmod 600 "$dest"
 }
 
@@ -46,6 +48,95 @@ ensure_gitignore() {
   fi
 }
 
+plugin_root() {
+  printf '%s' "${SEED_PLUGIN_ROOT:-http://127.0.0.1:7432}"
+}
+
+plugin_join() {
+  base=$1
+  rel=$2
+  case $rel in
+    http*://*) printf '%s' "$rel" ;;
+    /*) printf '%s%s' "$(plugin_root)" "$rel" ;;
+    *) printf '%s/%s' "$base" "$rel" ;;
+  esac
+}
+
+plugin_get() {
+  url=$1
+  auth=${2:-}
+  need curl
+  body=$(mktemp "${TMPDIR:-/tmp}/seed-plug.XXXXXX")
+  set +e
+  if [ -n "$auth" ]; then
+    code=$(curl -q -sS --connect-timeout 5 --max-time 30 \
+      -H "Authorization: Bearer $auth" -o "$body" -w '%{http_code}' "$url")
+  else
+    code=$(curl -q -sS --connect-timeout 5 --max-time 30 -o "$body" -w '%{http_code}' "$url")
+  fi
+  cs=$?
+  set -e
+  [ "$cs" -eq 0 ] || { rm -f "$body"; die "plugin: network failed (curl=$cs)" 71; }
+  case $code in
+    2*) cat "$body"; rm -f "$body" ;;
+    *) rm -f "$body"; die "plugin: HTTP $code" 72 ;;
+  esac
+}
+
+api_origin() {
+  printf '%s' "$1" | awk -F/ '{print $1"//"$3}'
+}
+
+load_channel_from_catalog() {
+  channel=$1
+  need jq
+  root=$(plugin_root)
+  seeddir=$root/seed
+  index=$(plugin_get "$seeddir/index.json")
+  rel=$(printf '%s' "$index" | jq -r '.models // empty')
+  [ -n "$rel" ] || die 'seed index has no models plugin' 69
+  catalog=$(plugin_get "$(plugin_join "$seeddir" "$rel")")
+  row=$(printf '%s' "$catalog" | jq -c --arg n "$channel" '.[$n] // empty')
+  if [ -z "$row" ]; then
+    keys=$(printf '%s' "$catalog" | jq -r 'keys | join(" ")')
+    die "unknown channel: $channel (have: $keys)" 64
+  fi
+  raw_api=$(printf '%s' "$row" | jq -r '.api_url // empty')
+  [ -n "$raw_api" ] || die "channel $channel has no api_url" 69
+  LLM_API_URL=$(plugin_join "$seeddir" "$raw_api")
+  LLM_EXTRA=$(printf '%s' "$row" | jq -c '.extra // {}')
+  raw_models=$(printf '%s' "$row" | jq -r '.models_url // empty')
+  if [ -n "$raw_models" ]; then
+    MODELS_URL=$(plugin_join "$seeddir" "$raw_models")
+  else
+    case $LLM_API_URL in
+      */chat/completions) MODELS_URL=${LLM_API_URL%/chat/completions}/models ;;
+      *) MODELS_URL=$(api_origin "$LLM_API_URL")/v1/models ;;
+    esac
+  fi
+}
+
+pick_model_once() {
+  need jq
+  list=$(plugin_get "$MODELS_URL" "$LLM_API_KEY")
+  ids=$(printf '%s' "$list" | jq -r '.data[].id // empty')
+  [ -n "$ids" ] || die 'model list is empty' 72
+  printf '%s\n' "$ids" | awk '{print NR") "$0}' >&2
+  printf 'model: ' >&2
+  if ! IFS= read -r choice; then
+    die 'no model chosen' 64
+  fi
+  [ -n "$choice" ] || die 'no model chosen' 64
+  case $choice in
+    *[!0-9]*)
+      printf '%s\n' "$ids" | grep -qxF "$choice" || die "unknown model: $choice" 64
+      LLM_MODEL=$choice ;;
+    *)
+      LLM_MODEL=$(printf '%s\n' "$ids" | awk -v n="$choice" 'NR==n {print; found=1} END {exit found?0:1}') \
+        || die "unknown model: $choice" 64 ;;
+  esac
+}
+
 resolve_provider() {
   case $1 in
     deepseek)
@@ -58,7 +149,11 @@ resolve_provider() {
       LLM_MODEL=${LLM_MODEL:-deepseek-v4-flash}
       LLM_EXTRA=${LLM_EXTRA:-'{}'}
       LLM_PROVIDER=custom ;;
-    *) die "unknown provider: $1 (use deepseek or a full API URL)" 64 ;;
+    *)
+      LLM_API_KEY=$2
+      load_channel_from_catalog "$1"
+      pick_model_once
+      LLM_PROVIDER=$1 ;;
   esac
   LLM_API_KEY=$2
 }
@@ -382,10 +477,12 @@ write_shims() {
     cp "$SELF" "$INSTALL/seed.sh"
     chmod 755 "$INSTALL/seed.sh"
   fi
-  for pair in "agent|--agent" "llm|--llm" "edit|--edit" "shell|--shell-cli"; do
+  cp "$SELF" "$INSTALL/bin/agent"
+  chmod 755 "$INSTALL/bin/agent"
+  for pair in "llm|--llm" "edit|--edit" "shell|--shell-cli"; do
     name=${pair%%|*}
     flag=${pair#*|}
-    printf '#!/bin/sh\nexec /bin/sh "$(CDPATH= cd "$(dirname "$0")/.." && pwd -P)/seed.sh" %s "$@"\n' "$flag" > "$INSTALL/bin/$name"
+    printf '#!/bin/sh\nexec /bin/sh "$(CDPATH= cd "$(dirname "$0")" && pwd -P)/agent" %s "$@"\n' "$flag" > "$INSTALL/bin/$name"
     chmod 755 "$INSTALL/bin/$name"
   done
 }
@@ -407,13 +504,16 @@ verify_install() {
     k1=$(jq -r -n --rawfile e "$LAUNCH_CWD/.env" '$e | split("\n") | map(select(startswith("LLM_API_KEY="))) | .[0] | split("=")[1]' 2>/dev/null || grep '^LLM_API_KEY=' "$LAUNCH_CWD/.env" | sed 's/^LLM_API_KEY=//')
     [ -n "$k1" ] || { printf '  FAIL .env has no key\n' >&2; bad=$((bad + 1)); }
   fi
-  intro=$(LAUNCH_CWD=$LAUNCH_CWD /bin/sh "$INSTALL/bin/agent" </dev/null 2>&1 || true)
+  intro=$(LAUNCH_CWD=$LAUNCH_CWD SLAB_SKIP_INIT=1 /bin/sh "$INSTALL/bin/agent" </dev/null 2>&1 || true)
   printf '%s' "$intro" | grep -q '>' || { printf '  FAIL agent prompt missing\n' >&2; bad=$((bad + 1)); }
   extra=$(printf '%s' "$intro" | tr -d '>\n ')
   [ -z "$extra" ] || { printf '  FAIL agent lectured on open\n' >&2; bad=$((bad + 1)); }
   baked=$(printf '/%s/|/%s/' Users home)
   if grep -E "$baked" "$INSTALL/bin/agent" "$INSTALL/bin/edit" "$INSTALL/bin/llm" "$INSTALL/bin/shell" >/dev/null 2>&1; then
     printf '  FAIL shim baked a host path\n' >&2; bad=$((bad + 1))
+  fi
+  if grep -E 'exec /bin/sh .*seed\.sh' "$INSTALL/bin/agent" >/dev/null 2>&1; then
+    printf '  FAIL agent execs seed.sh\n' >&2; bad=$((bad + 1))
   fi
   w=$(mktemp -d "${TMPDIR:-/tmp}/seed-ver.XXXXXX")
   w=$(CDPATH= cd "$w" && pwd)
@@ -434,7 +534,7 @@ STUB
   set +e
   (
     cd "$w"
-    SEED_LLM_STUB=$stub SEED_VER_N=$w/n /bin/sh "$INSTALL/bin/agent" --oneshot 'pwd'
+    SLAB_SKIP_INIT=1 SEED_LLM_STUB=$stub SEED_VER_N=$w/n /bin/sh "$INSTALL/bin/agent" --oneshot 'pwd'
   ) > "$w/out" 2> "$w/err"
   set -e
   if ! grep -q ok "$w/out"; then
@@ -457,9 +557,156 @@ install_main() {
   printf 'installed: %s/bin/agent\n' "$INSTALL" >&2
 }
 
+product_root() {
+  case $SELF in
+    */bin/agent) CDPATH= cd "$(dirname "$SELF")/.." && pwd -P ;;
+    *) CDPATH= cd "$(dirname "$SELF")" && pwd -P ;;
+  esac
+}
+
+product_system() {
+  printf '%s\nMachine index: %s\nProject memory: %s\n' \
+    "$(cabin_product_system)" \
+    "$INSTALL/agent-store/index.json" \
+    "$PWD/.agent-memory/index.json"
+}
+
+agent_plugin_get() {
+  url=$1
+  need curl
+  body=$(mktemp "${TMPDIR:-/tmp}/seed-aplg.XXXXXX")
+  set +e
+  code=$(curl -q -sS --connect-timeout 5 --max-time 30 -o "$body" -w '%{http_code}' "$url")
+  cs=$?
+  set -e
+  [ "$cs" -eq 0 ] || { rm -f "$body"; die "agent plugin: network failed (curl=$cs)" 71; }
+  case $code in
+    2*) cat "$body"; rm -f "$body" ;;
+    *) rm -f "$body"; die "agent plugin: HTTP $code" 72 ;;
+  esac
+}
+
+agent_ready() {
+  f=$INSTALL/agent-store/index.json
+  [ -f "$f" ] || return 1
+  jq -e '.ready == true' "$f" >/dev/null 2>&1
+}
+
+agent_check_machine_tree() {
+  f=$INSTALL/agent-store/index.json
+  [ -f "$f" ] || return 1
+  jq -e '
+    type == "object"
+    and .ready == true
+    and has("version")
+    and has("system")
+    and has("ours")
+    and (.system | has("tools") and has("skills") and has("other"))
+    and (.system.tools | has("sh") and has("curl") and has("jq")
+         and has("rg") and has("git") and has("python"))
+  ' "$f" >/dev/null 2>&1
+}
+
+agent_fetch_required() {
+  store=$INSTALL/agent-store
+  mkdir -p "$store/plugins"
+  if [ -f "$store/catalog.json" ] && [ -f "$store/plugins/init.json" ]; then
+    return 0
+  fi
+  root=$(plugin_root)
+  index=$(agent_plugin_get "$root/agent/index.json")
+  printf '%s' "$index" | jq -e 'type == "object"' >/dev/null 2>&1 \
+    || die "agent plugin: catalog is not JSON" 69
+  rel=$(printf '%s' "$index" | jq -r '.required.init // empty')
+  [ -n "$rel" ] || die "agent plugin: catalog has no required.init" 69
+  body=$(agent_plugin_get "$(plugin_join "$root/agent" "$rel")")
+  printf '%s' "$body" | jq -e \
+    'type == "object" and has("prompt") and has("machine_tree") and has("memory_tree")' \
+    >/dev/null 2>&1 || die "agent plugin: init pack invalid" 69
+  tmp=$(mktemp "${TMPDIR:-/tmp}/seed-acat.XXXXXX")
+  printf '%s\n' "$index" > "$tmp"
+  printf '%s\n' "$body" > "$store/plugins/init.json"
+  mv "$tmp" "$store/catalog.json"
+}
+
+agent_place_trees() {
+  store=$INSTALL/agent-store
+  pack=$store/plugins/init.json
+  [ -f "$pack" ] || die "agent plugin: init pack missing" 69
+  if [ ! -f "$store/index.json" ]; then
+    jq '.machine_tree' "$pack" > "$store/index.json"
+  fi
+  memdir=$PWD/.agent-memory
+  if [ ! -f "$memdir/index.json" ]; then
+    if mkdir -p "$memdir" 2>/dev/null \
+      && jq '.memory_tree' "$pack" > "$memdir/index.json" 2>/dev/null; then
+      :
+    else
+      printf 'error: memory index not writable\n' >&2
+    fi
+  fi
+}
+
+agent_run_init() {
+  pack=$INSTALL/agent-store/plugins/init.json
+  prompt=$(jq -r '.prompt // empty' "$pack")
+  [ -n "$prompt" ] || die "agent plugin: init prompt empty" 69
+  ev=${AGENT_RUNS_DIR:-$PWD/.agent-runs}/$(date -u +%Y%m%dT%H%M%SZ)-$$-init
+  sess=$ev/session
+  mkdir -p "$ev"
+  shell_init "$sess" "$PWD"
+  set +e
+  run_loop "$(product_system)" "$prompt" "$sess" "$ev" "$AGENT_MAX_ROUNDS" 0
+  as=$?
+  set -e
+  shell_stop "$sess" 2>/dev/null || :
+  [ "$as" -eq 0 ] || die "init failed" 76
+}
+
+agent_ensure_init() {
+  [ "${SLAB_SKIP_INIT:-}" = 1 ] && return 0
+  agent_ready && return 0
+  printf 'initializing:\n' >&2
+  agent_fetch_required
+  agent_place_trees
+  agent_run_init
+  agent_check_machine_tree || die "init failed" 76
+}
+
+agent_update() {
+  store=$INSTALL/agent-store
+  mkdir -p "$store/plugins"
+  root=$(plugin_root)
+  index=$(agent_plugin_get "$root/agent/index.json")
+  printf '%s' "$index" | jq -e 'type == "object"' >/dev/null 2>&1 \
+    || die "agent plugin: catalog is not JSON" 69
+  nv=$(printf '%s' "$index" | jq -r '.version // empty')
+  nu=$(printf '%s' "$index" | jq -r '.updated // empty')
+  ov=; ou=
+  if [ -f "$store/catalog.json" ]; then
+    ov=$(jq -r '.version // empty' "$store/catalog.json")
+    ou=$(jq -r '.updated // empty' "$store/catalog.json")
+  fi
+  if [ "$nv" = "$ov" ] && [ "$nu" = "$ou" ]; then
+    return 0
+  fi
+  rel=$(printf '%s' "$index" | jq -r '.required.init // empty')
+  [ -n "$rel" ] || die "agent plugin: catalog has no required.init" 69
+  body=$(agent_plugin_get "$(plugin_join "$root/agent" "$rel")")
+  printf '%s' "$body" | jq -e 'has("prompt")' >/dev/null 2>&1 \
+    || die "agent plugin: init pack invalid" 69
+  tmpc=$(mktemp "${TMPDIR:-/tmp}/seed-ucat.XXXXXX")
+  tmpi=$(mktemp "${TMPDIR:-/tmp}/seed-uinit.XXXXXX")
+  printf '%s\n' "$index" > "$tmpc"
+  printf '%s\n' "$body" > "$tmpi"
+  mv "$tmpi" "$store/plugins/init.json"
+  mv "$tmpc" "$store/catalog.json"
+}
+
 agent_main() {
-  INSTALL=$(CDPATH= cd "$(dirname "$SELF")" && pwd -P)
+  INSTALL=$(product_root)
   load_env
+  agent_ensure_init
   oneshot=0
   task=
   if [ "${1:-}" = --oneshot ]; then
@@ -479,7 +726,7 @@ agent_main() {
   mkdir -p "$ev"
   shell_init "$sess" "$PWD"
   set +e
-  run_loop "$(cabin_product_system)" "$task" "$sess" "$ev" "$AGENT_MAX_ROUNDS" 1
+  run_loop "$(product_system)" "$task" "$sess" "$ev" "$AGENT_MAX_ROUNDS" 1
   as=$?
   set -e
   if [ "$oneshot" -eq 1 ]; then
@@ -497,7 +744,7 @@ agent_main() {
       sess=$ev/session
       shell_init "$sess" "$PWD"
     fi
-    run_loop "$(cabin_product_system)" "$line" "$sess" "$ev" "$AGENT_MAX_ROUNDS" 1 || :
+    run_loop "$(product_system)" "$line" "$sess" "$ev" "$AGENT_MAX_ROUNDS" 1 || :
   done
   shell_stop "$sess" 2>/dev/null || :
 }
@@ -512,6 +759,11 @@ case ${1:-} in
   --parse-turn) shift; parse_turn "$1"; exit 0 ;;
   --llm) shift; llm_main "$@"; exit 0 ;;
   --edit) shift; edit_main "$@"; exit 0 ;;
+  --update)
+    INSTALL=$(product_root)
+    load_env
+    agent_update
+    exit 0 ;;
   --shell-init) shift; probe; shell_init "$1" "$2"; exit 0 ;;
   --shell) shift; shell_run "$1" "$2"; exit 0 ;;
   --shell-stop) shift; shell_stop "$1"; exit 0 ;;
@@ -520,6 +772,11 @@ case ${1:-} in
   --selftest) selftest; exit 0 ;;
   -h|--help) usage; exit 0 ;;
 esac
+
+if [ "$(basename "$0")" = agent ]; then
+  agent_main "$@"
+  exit 0
+fi
 
 INSTALL=.
 case ${1:-} in

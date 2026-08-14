@@ -11,16 +11,23 @@ ck() {
 }
 
 d=$(mktemp -d "${TMPDIR:-/tmp}/seed-pkg.XXXXXX")
-trap 'rm -rf "$d"' EXIT
+PLUGIN_PID=
+cleanup() {
+  [ -n "${PLUGIN_PID:-}" ] && kill "$PLUGIN_PID" 2>/dev/null || true
+  rm -rf "$d"
+}
+trap cleanup EXIT
 
 BUILD=$ROOT/build
 ck "build/pack.sh exists" test -f "$BUILD/pack.sh"
 for f in \
-  loop.sh model.sh edit.sh shell.sh env.sh install.sh agent.sh \
+  loop.sh model.sh edit.sh shell.sh env.sh install.sh agent.sh product.sh \
   prompts/product-system.txt prompts/tools.json
 do
   ck "build/$f" test -f "$BUILD/$f"
 done
+ck "agent plugin index" test -f "$ROOT/plugins/agent/index.json"
+ck "agent plugin init" test -f "$ROOT/plugins/agent/init.json"
 ck "no installer prompt" test ! -f "$BUILD/prompts/installer-system.txt"
 ck "no installer task" test ! -f "$BUILD/prompts/installer-task.txt"
 if [ -f "$BUILD/pack.sh" ]; then
@@ -176,7 +183,19 @@ ck "bin/llm exists" test -x "$cwd/bin/llm"
 ck "agent syntax" /bin/sh -n "$cwd/bin/agent"
 ck "no host home path in agent shim" awk 'BEGIN{c=0} /\/Users\//{c=1} END{exit c}' "$cwd/bin/agent"
 
-intro=$($cwd/bin/agent </dev/null 2>&1 || true)
+if grep -q 'parse_turn' "$cwd/bin/agent" \
+  && ! grep -E 'exec /bin/sh .*seed\.sh' "$cwd/bin/agent" >/dev/null; then
+  printf 'ok   installed agent carries the loop\n'
+else
+  printf 'FAIL installed agent carries the loop\n'; fail=$((fail + 1))
+fi
+if grep -E 'exec /bin/sh .*seed\.sh' "$cwd/bin/edit" >/dev/null; then
+  printf 'FAIL edit shim does not exec seed.sh\n'; fail=$((fail + 1))
+else
+  printf 'ok   edit shim does not exec seed.sh\n'
+fi
+
+intro=$(SLAB_SKIP_INIT=1 "$cwd/bin/agent" </dev/null 2>&1 || true)
 if printf '%s' "$intro" | grep -q '当前目录\|能在当前目录'; then
   printf 'FAIL agent stays quiet on open\n'; fail=$((fail + 1))
 elif printf '%s' "$intro" | grep -q '>'; then
@@ -201,10 +220,22 @@ work=$d/work
 mkdir -p "$work"
 (
   cd "$work"
-  SEED_LLM_STUB=$stub STUB_N=$STUB_N "$cwd/bin/agent" --oneshot 'where am i'
+  SLAB_SKIP_INIT=1 SEED_LLM_STUB=$stub STUB_N=$STUB_N "$cwd/bin/agent" --oneshot 'where am i'
 ) > "$d/one.out" 2> "$d/one.err" || true
 if grep -q 'done' "$d/one.out"; then printf 'ok   oneshot final answer only-ish\n'
 else printf 'FAIL oneshot final answer only-ish\n'; fail=$((fail + 1)); fi
+# detach: engine is bin/agent, sibling seed.sh can go
+rm -f "$cwd/seed.sh"
+printf '0\n' > "$STUB_N"
+(
+  cd "$work"
+  SLAB_SKIP_INIT=1 SEED_LLM_STUB=$stub STUB_N=$STUB_N "$cwd/bin/agent" --oneshot 'where am i'
+) > "$d/det.out" 2> "$d/det.err" || true
+if grep -q 'done' "$d/det.out"; then printf 'ok   agent runs after seed.sh deleted\n'
+else printf 'FAIL agent runs after seed.sh deleted\n'; fail=$((fail + 1)); fi
+# restore installer copy so later tests that expect it still pass
+cp "$SEED" "$cwd/seed.sh"
+chmod 755 "$cwd/seed.sh"
 if awk 'BEGIN{c=0} /tool_calls/{c=1} END{exit c}' "$d/one.out"; then
   printf 'ok   oneshot did not dump JSON tool_calls\n'
 else
@@ -233,7 +264,7 @@ repl=$d/repl
 mkdir -p "$repl"
 (
   cd "$repl"
-  export SEED_LLM_STUB=$stub STUB_N=$STUB_N
+  export SLAB_SKIP_INIT=1 SEED_LLM_STUB=$stub STUB_N=$STUB_N
   printf '%s\n%s\n' 'make a box and enter it' 'where am i' | "$cwd/bin/agent"
 ) > "$d/repl.out" 2> "$d/repl.err" || true
 if grep -q 'made-box' "$d/repl.out" && grep -q 'still-in-box' "$d/repl.out"; then
@@ -263,6 +294,225 @@ if grep -q '\[seed\] tokens' "$d/cap.err" "$d/err"; then
   printf 'FAIL install has no token heartbeat\n'; fail=$((fail + 1))
 else
   printf 'ok   install has no token heartbeat\n'
+fi
+
+# seed plugin: one catalog, then models plugin, one pick
+if command -v python3 >/dev/null 2>&1 && command -v curl >/dev/null 2>&1; then
+  PORT=$(python3 -c 'import socket;s=socket.socket();s.bind(("127.0.0.1",0));print(s.getsockname()[1]);s.close()')
+  python3 -m http.server "$PORT" --bind 127.0.0.1 --directory "$ROOT/plugins" >/dev/null 2>&1 &
+  PLUGIN_PID=$!
+  i=0
+  while [ "$i" -lt 30 ]; do
+    curl -sS -o /dev/null "http://127.0.0.1:$PORT/seed/index.json" 2>/dev/null && break
+    i=$((i + 1))
+    sleep 0.1
+  done
+  PROOT=http://127.0.0.1:$PORT
+  qdir=$d/qwen
+  mkdir -p "$qdir"
+  (
+    cd "$qdir"
+    printf '1\n' | SEED_PLUGIN_ROOT=$PROOT /bin/sh "$SEED" qwen sk-TESTQWEN
+  ) > "$d/qwen.out" 2> "$d/qwen.err" || true
+  ck "qwen install wrote agent" test -x "$qdir/bin/agent"
+  ck "qwen .env has picked model" grep -q 'LLM_MODEL=qwen-plus' "$qdir/.env"
+  ck "qwen .env has provider" grep -q 'LLM_PROVIDER=qwen' "$qdir/.env"
+  ck "qwen key not in stderr" awk 'BEGIN{c=0} /sk-TESTQWEN/{c=1} END{exit c}' "$d/qwen.err"
+  nodir=$d/nopick
+  mkdir -p "$nodir"
+  (
+    cd "$nodir"
+    SEED_PLUGIN_ROOT=$PROOT /bin/sh "$SEED" qwen sk-TESTQWEN </dev/null
+  ) > "$d/nopick.out" 2> "$d/nopick.err" || true
+  if [ -x "$nodir/bin/agent" ]; then
+    printf 'FAIL eof does not install\n'; fail=$((fail + 1))
+  else
+    printf 'ok   eof does not install\n'
+  fi
+  (
+    cd "$d"
+    mkdir -p nosuch
+    cd nosuch
+    printf '1\n' | SEED_PLUGIN_ROOT=$PROOT /bin/sh "$SEED" nosuch sk-x
+  ) > "$d/ns.out" 2> "$d/ns.err" || true
+  if grep -q 'unknown channel' "$d/ns.err" && grep -q qwen "$d/ns.err"; then
+    printf 'ok   unknown channel lists catalog\n'
+  else
+    printf 'FAIL unknown channel lists catalog\n'; fail=$((fail + 1))
+  fi
+
+  # first open without agent plugin: error, no prompt
+  (
+    cd "$cwd"
+    SEED_PLUGIN_ROOT=http://127.0.0.1:1 "$cwd/bin/agent" </dev/null
+  ) > "$d/dead.out" 2> "$d/dead.err" || true
+  if grep -q 'error:' "$d/dead.err" && ! grep -q '>' "$d/dead.err"; then
+    printf 'ok   missing agent plugin errors before prompt\n'
+  else
+    printf 'FAIL missing agent plugin errors before prompt\n'; fail=$((fail + 1))
+  fi
+
+  # init stub fills the machine tree to the disk standard
+  cat > "$cwd/fill-tree.sh" <<'SH'
+#!/bin/sh
+jq '.ready=true
+  | .updated="t"
+  | .system.tools.sh.present=true
+  | .system.tools.curl.present=true
+  | .system.tools.jq.present=true
+  | .system.tools.rg.present=true
+  | .system.tools.git.present=true
+  | .system.tools.python.present=true' \
+  agent-store/index.json > agent-store/index.json.tmp
+mv agent-store/index.json.tmp agent-store/index.json
+SH
+  chmod 755 "$cwd/fill-tree.sh"
+  cat > "$stub" <<'EOF'
+#!/bin/sh
+n=$(cat "${STUB_N}" 2>/dev/null || echo 0); n=$((n + 1)); printf '%s\n' "$n" > "${STUB_N}"
+if [ "$n" -eq 1 ]; then
+  printf '%s\n' '{"content":"","tool_calls":[{"id":"i1","name":"shell","arguments":"{\"command\":\"sh fill-tree.sh\"}"}],"usage":{"prompt_tokens":1,"completion_tokens":1}}'
+else
+  printf '%s\n' '{"content":"inited","tool_calls":[],"usage":{"prompt_tokens":1,"completion_tokens":1}}'
+fi
+EOF
+  printf '0\n' > "$STUB_N"
+  (
+    cd "$cwd"
+    SEED_PLUGIN_ROOT=$PROOT SEED_LLM_STUB=$stub STUB_N=$STUB_N \
+      "$cwd/bin/agent" </dev/null
+  ) > "$d/init.out" 2> "$d/init.err" || true
+  if grep -q 'initializing:' "$d/init.err" && grep -q '>' "$d/init.err"; then
+    printf 'ok   first open inits then prompts\n'
+  else
+    printf 'FAIL first open inits then prompts\n'; fail=$((fail + 1))
+  fi
+  if grep -q 'inited' "$d/init.out"; then
+    printf 'FAIL init hid model final text\n'; fail=$((fail + 1))
+  else
+    printf 'ok   init hid model final text\n'
+  fi
+  if jq -e '.ready == true and .system.tools.sh' "$cwd/agent-store/index.json" >/dev/null 2>&1; then
+    printf 'ok   init wrote ready machine tree\n'
+  else
+    printf 'FAIL init wrote ready machine tree\n'; fail=$((fail + 1))
+  fi
+  ck "init cached catalog" test -f "$cwd/agent-store/catalog.json"
+  ck "init cached init plugin" test -f "$cwd/agent-store/plugins/init.json"
+  ck "init wrote memory tree" test -f "$cwd/.agent-memory/index.json"
+
+  # already ready: dead plugin root still opens
+  (
+    cd "$cwd"
+    SEED_PLUGIN_ROOT=http://127.0.0.1:1 "$cwd/bin/agent" </dev/null
+  ) > "$d/ready.out" 2> "$d/ready.err" || true
+  if grep -q '>' "$d/ready.err" && ! grep -q 'initializing:' "$d/ready.err"; then
+    printf 'ok   ready agent opens offline\n'
+  else
+    printf 'FAIL ready agent opens offline\n'; fail=$((fail + 1))
+  fi
+
+  # version bump: plain open does not refetch; --update does
+  oldver=
+  if [ -f "$cwd/agent-store/catalog.json" ]; then
+    oldver=$(jq -r '.version // empty' "$cwd/agent-store/catalog.json")
+  fi
+  up=$d/plugup
+  mkdir -p "$up/agent" "$up/seed"
+  cp "$ROOT/plugins/seed/"*.json "$up/seed/" 2>/dev/null || true
+  jq '.version="2" | .updated="2099-01-01T00:00:00Z"' \
+    "$ROOT/plugins/agent/index.json" > "$up/agent/index.json"
+  if [ -f "$ROOT/plugins/agent/init.json" ]; then
+    jq '.prompt=("updated-init-prompt " + .prompt)' \
+      "$ROOT/plugins/agent/init.json" > "$up/agent/init.json"
+  else
+    printf '%s\n' '{"prompt":"updated-init-prompt","machine_tree":{},"memory_tree":{}}' > "$up/agent/init.json"
+  fi
+  kill "$PLUGIN_PID" 2>/dev/null || true
+  PLUGIN_PID=
+  PORT2=$(python3 -c 'import socket;s=socket.socket();s.bind(("127.0.0.1",0));print(s.getsockname()[1]);s.close()')
+  python3 -m http.server "$PORT2" --bind 127.0.0.1 --directory "$up" >/dev/null 2>&1 &
+  PLUGIN_PID=$!
+  i=0
+  while [ "$i" -lt 30 ]; do
+    curl -sS -o /dev/null "http://127.0.0.1:$PORT2/agent/index.json" 2>/dev/null && break
+    i=$((i + 1))
+    sleep 0.1
+  done
+  PROOT2=http://127.0.0.1:$PORT2
+  (
+    cd "$cwd"
+    SEED_PLUGIN_ROOT=$PROOT2 "$cwd/bin/agent" </dev/null
+  ) > "$d/noup.out" 2> "$d/noup.err" || true
+  nowver=
+  [ -f "$cwd/agent-store/catalog.json" ] && nowver=$(jq -r '.version' "$cwd/agent-store/catalog.json")
+  if [ -n "$oldver" ] && [ "$nowver" = "$oldver" ]; then
+    printf 'ok   plain open does not refresh catalog\n'
+  else
+    printf 'FAIL plain open does not refresh catalog\n'; fail=$((fail + 1))
+  fi
+  (
+    cd "$cwd"
+    SEED_PLUGIN_ROOT=$PROOT2 "$cwd/bin/agent" --update
+  ) > "$d/up.out" 2> "$d/up.err" || true
+  nowver=
+  [ -f "$cwd/agent-store/catalog.json" ] && nowver=$(jq -r '.version' "$cwd/agent-store/catalog.json")
+  if [ "$nowver" = 2 ]; then
+    printf 'ok   --update refreshes catalog\n'
+  else
+    printf 'FAIL --update refreshes catalog\n'; fail=$((fail + 1))
+  fi
+  if jq -e '.ready == true' "$cwd/agent-store/index.json" >/dev/null 2>&1; then
+    printf 'ok   --update does not rescan\n'
+  else
+    printf 'FAIL --update does not rescan\n'; fail=$((fail + 1))
+  fi
+
+  # bad stub deletes a required branch -> init failed
+  bad=$d/badinit
+  mkdir -p "$bad"
+  cp "$cwd/.env" "$bad/.env"
+  mkdir -p "$bad/bin"
+  cp "$cwd/bin/agent" "$bad/bin/agent"
+  chmod 755 "$bad/bin/agent"
+  cat > "$bad/break-tree.sh" <<'SH'
+#!/bin/sh
+jq 'del(.system)' agent-store/index.json > agent-store/index.json.tmp
+mv agent-store/index.json.tmp agent-store/index.json
+SH
+  chmod 755 "$bad/break-tree.sh"
+  cat > "$stub" <<'EOF'
+#!/bin/sh
+n=$(cat "${STUB_N}" 2>/dev/null || echo 0); n=$((n + 1)); printf '%s\n' "$n" > "${STUB_N}"
+if [ "$n" -eq 1 ]; then
+  printf '%s\n' '{"content":"","tool_calls":[{"id":"b1","name":"shell","arguments":"{\"command\":\"sh break-tree.sh\"}"}],"usage":{"prompt_tokens":1,"completion_tokens":1}}'
+else
+  printf '%s\n' '{"content":"nope","tool_calls":[],"usage":{"prompt_tokens":1,"completion_tokens":1}}'
+fi
+EOF
+  printf '0\n' > "$STUB_N"
+  (
+    cd "$bad"
+    SEED_PLUGIN_ROOT=$PROOT2 SEED_LLM_STUB=$stub STUB_N=$STUB_N \
+      "$bad/bin/agent" </dev/null
+  ) > "$d/bad.out" 2> "$d/bad.err" || true
+  if grep -q 'error: init failed' "$d/bad.err" && ! grep -q '>' "$d/bad.err"; then
+    printf 'ok   broken tree fails init\n'
+  else
+    printf 'FAIL broken tree fails init\n'; fail=$((fail + 1))
+  fi
+  if [ -f "$bad/agent-store/index.json" ] && jq -e '.ready == true' "$bad/agent-store/index.json" >/dev/null 2>&1; then
+    printf 'FAIL broken tree is not ready\n'; fail=$((fail + 1))
+  else
+    printf 'ok   broken tree is not ready\n'
+  fi
+  if awk 'BEGIN{c=0} /sk-TESTKEYNOTREAL/{c=1} END{exit c}' "$d/init.err" "$d/bad.err" "$d/up.err"; then
+    printf 'ok   agent plugin evidence has no key\n'
+  else
+    printf 'FAIL agent plugin evidence has no key\n'; fail=$((fail + 1))
+  fi
+else
+  printf 'FAIL python3+curl needed for plugin tests\n'; fail=$((fail + 1))
 fi
 
 [ "$fail" -eq 0 ] || { printf '\nSEED-PACKAGE FAIL: %s\n' "$fail"; exit 1; }

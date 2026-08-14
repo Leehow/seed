@@ -1,5 +1,7 @@
 .env
 .agent-runs/
+agent-store/
+.agent-memory/
 .runs/
 .agent/
 .seed/

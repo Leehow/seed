@@ -3,7 +3,7 @@
 slab 是一个实验：**POSIX `/bin/sh` 能不能撑住一个带工具的 coding agent。**  
 不是再做一个 Claude Code。不是用 Python 写 loop 再套一层 `sh`。
 
-人要带走的是打好的 **`seed.sh`**。`bin/agent` 是种子写的两行 shim，不是模型另写的一套程序。模型在某个工作区里长出的网页、脚本、项目代码，属于那个工作区，不属于种子。
+人要带走的是打好的 **`seed.sh`**。安装把同一套 loop 写进 `bin/agent`，之后可以丢掉安装器；模型不另写一套程序。模型在某个工作区里长出的网页、脚本、项目代码，属于那个工作区，不属于种子。
 
 理念长文：[docs/理念与设计.md](docs/理念与设计.md)  
 安装契约：[docs/superpowers/specs/2026-08-13-seed-package-design.md](docs/superpowers/specs/2026-08-13-seed-package-design.md)
@@ -17,7 +17,7 @@ slab 是一个实验：**POSIX `/bin/sh` 能不能撑住一个带工具的 codin
 3. **工作区 = 启动 `bin/agent` 时的 `$PWD`。** 禁止把 `/Users/`、`/home/` 或任何本机绝对路径写进产物。
 4. **一份 POSIX 种子，跟宿主 `$SHELL` 走。** 不要为 Mac / Linux 维护两套，不要假设 Bash 5，不要用 `sed -i`、`head -c`、`pgrep`、`timeout(1)`。
 5. **外壳拥有循环。** 不要改成「每条任务让模型写一段 controller 再自己调 llm」。
-6. **种子对人零交互。** 安装不叫模型。状态和错误用英文机器话（`error:`、`installed:`）。产物打开就是 `>`，只显示用户输入和最后回答，没有开场白。
+6. **种子对人零交互。** 安装不叫模型。状态和错误用英文机器话（`error:`、`installed:`）。产物第一次打开先 `initializing:`，就绪后才是 `>`，只显示用户输入和最后回答，没有开场白。
 7. **不信模型口头说装好了。** 种子自己看磁盘验收。安装只写文件、写 shim、验磁盘。
 8. **之后不限制语言。** 模型在工作区里写什么都行。那是产物在干活，不是外壳作弊。
 
@@ -28,7 +28,8 @@ slab 是一个实验：**POSIX `/bin/sh` 能不能撑住一个带工具的 codin
 | 路径 | 角色 |
 |---|---|
 | `seed.sh` | **打包态 / 运行时。** 用户跑的就是它。测试也打它。 |
-| `bin/{agent,edit,llm,shell}` | 薄入口：`exec` 回旁边的 `seed.sh --agent` 等。用 `dirname` 找文件，不烤绝对路径。 |
+| `bin/agent` | 安装写出的产物引擎（自带 loop）。仓库里的 `bin/*` 仍是开发用薄入口。 |
+| `bin/{edit,llm,shell}` | 指向 `bin/agent` 的薄入口。 |
 | `tests/seed-package.sh` | 离线合同。不联网。必须绿。 |
 | `build/` | **设计源。** loop、提示词、任务、工具实现分开放。改种子请改这里，再 `sh build/pack.sh`。 |
 | `docs/` | 给人读的理念和规格。 |
@@ -60,7 +61,8 @@ build/
   edit.sh                 # 唯一字符串替换
   shell.sh                # 持久登录壳
   env.sh                  # .env、渠道、探测
-  install.sh              # shim、磁盘验收、安装入口
+  install.sh              # 写出 bin/agent、磁盘验收、安装入口
+  product.sh              # agent plugin、初始化、两棵树
   agent.sh                # 给人用的窗口
   prompts/
     product-system.txt    # 产物 SYSTEM
@@ -77,10 +79,14 @@ build/
 
 ```sh
 sh seed.sh deepseek sk-xxxx    # 装到当前目录，写 .env
+sh plugins/serve.sh            # 本地 plugin 根 http://127.0.0.1:7432
+sh seed.sh qwen sk-xxxx        # 非内置渠道：拉 seed/index.json → models → 选一次
 sh bin/agent                   # 交互；工作区是当前目录
 sh bin/agent "任务"            # 一次性
 /bin/sh tests/seed-package.sh  # 离线验收，改完必跑
 ```
+
+种子写死 plugin 根 `http://127.0.0.1:7432`（测试可用 `SEED_PLUGIN_ROOT` 覆盖）。安装只拉 seed 目录。`deepseek` 和完整 URL 不查目录。`bin/agent` 第一次打开才拉 `<根>/agent/index.json`，跑初始化，写 `agent-store/`。
 
 用法只有这一行。不要安装目录参数，永远是当前目录。多传路径直接退出。只写 `sh seed.sh deepseek`（没有 key）必须报错要 key。`.env` 已在时可以 `sh seed.sh` 重装，但不必写进 usage。
 

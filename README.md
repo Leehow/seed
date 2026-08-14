@@ -9,7 +9,9 @@
 `seed.sh` 是种子。主 loop 和自带工具（持久 shell、edit）只用 shell + curl + jq。`bin/agent` 是种子写的薄入口，不是模型另写的一套程序。之后模型在工作区里长出的东西不限语言。
 
 ```sh
-sh seed.sh deepseek sk-xxxx   # 装到当前目录
+sh seed.sh deepseek sk-xxxx   # 装到当前目录（内置，可离线）
+sh plugins/serve.sh           # 本地模拟 plugin 目录（7432）
+sh seed.sh qwen sk-xxxx       # 拉目录 → models 插件 → 问一次选模型
 sh bin/agent                  # 交互；工作区是当前目录
 sh bin/agent "任务"           # 一次性
 sh build/pack.sh              # 改完 build/ 后打回 seed.sh
