@@ -20,9 +20,9 @@ heartbeat() { printf '\r[seed] tokens prompt=%s completion=%s' "${1:-0}" "${2:-0
 usage() {
   cat >&2 <<'EOF'
 用法：
-  sh seed.sh <渠道> <API_KEY> [目标目录]   开始安装，渠道 = deepseek | openai | 完整URL
-  sh seed.sh [目标目录]                    继续 / 重装（凭据读 .env）
-  sh seed.sh --selftest                    离线自测，不联网
+  sh seed.sh deepseek <API_KEY> [目标目录]  开始安装（或把渠道写成完整 URL）
+  sh seed.sh [目标目录]                     继续 / 重装（凭据读 .env）
+  sh seed.sh --selftest                     离线自测，不联网
 默认装到当前目录。装好后：sh bin/agent
 EOF
 }
@@ -110,17 +110,12 @@ resolve_provider() {
       LLM_MODEL=${LLM_MODEL:-deepseek-v4-flash}
       LLM_EXTRA=${LLM_EXTRA:-'{"thinking":{"type":"enabled"}}'}
       LLM_PROVIDER=deepseek ;;
-    openai)
-      LLM_API_URL=${LLM_API_URL:-https://api.openai.com/v1/chat/completions}
-      LLM_MODEL=${LLM_MODEL:-gpt-5.1}
-      LLM_EXTRA=${LLM_EXTRA:-'{}'}
-      LLM_PROVIDER=openai ;;
     http*://*)
       LLM_API_URL=$1
-      LLM_MODEL=${LLM_MODEL:-default}
+      LLM_MODEL=${LLM_MODEL:-deepseek-v4-flash}
       LLM_EXTRA=${LLM_EXTRA:-'{}'}
       LLM_PROVIDER=custom ;;
-    *) die "不认识的渠道：$1（用 deepseek、openai，或完整 URL）" 64 ;;
+    *) die "不认识的渠道：$1（用 deepseek，或完整 API URL）" 64 ;;
   esac
   LLM_API_KEY=$2
 }
@@ -128,12 +123,9 @@ resolve_provider() {
 probe() {
   USER_SHELL=${SHELL:-/bin/sh}
   need jq
-  HAS_TIMEOUT=0
-  command -v timeout >/dev/null 2>&1 && HAS_TIMEOUT=1
   FACTS="os=$(uname -s) $(uname -r) $(uname -m)
 shell=$USER_SHELL
 jq=$(command -v jq)
-timeout=$HAS_TIMEOUT
 install=${INSTALL:-}
 launch_cwd=$LAUNCH_CWD"
 }
@@ -179,7 +171,7 @@ SESSION=$1
 cd "$(cat "$SESSION/workdir")" || exit 70
 while [ -f "$SESSION/alive" ]; do
   if [ ! -f "$SESSION/request" ]; then
-    sleep 0.05
+    sleep 0.05 2>/dev/null || sleep 1
     continue
   fi
   cmd=$(cat "$SESSION/request")
@@ -195,16 +187,18 @@ EOS
   "$USER_SHELL" "$session/worker.sh" "$session" \
     </dev/null >"$session/worker.out" 2>"$session/worker.err" &
   echo $! > "$session/pid"
-  i=0
-  while [ ! -f "$session/alive" ] && [ "$i" -lt 20 ]; do sleep 0.05; i=$((i + 1)); done
+}
+
+# pid/ppid listing works on macOS and Linux; no pgrep.
+child_pids() {
+  ps -eo pid= -o ppid= 2>/dev/null | awk -v p="$1" '$2==p {print $1}'
 }
 
 kill_tree() {
   pid=$1
   case ${pid:-} in ''|*[!0-9]*) return 0 ;; esac
   [ "$pid" -gt 1 ] || return 0
-  kids=$(pgrep -P "$pid" 2>/dev/null || true)
-  for c in $kids; do
+  for c in $(child_pids "$pid"); do
     kill_tree "$c"
   done
   kill "$pid" 2>/dev/null || true
@@ -228,14 +222,12 @@ shell_run() {
   printf '%s\n' "$cmd" > "$session/request.tmp"
   mv "$session/request.tmp" "$session/request"
   n=0
-  limit=$((ACTION_TIMEOUT * 20))
-  [ "$limit" -gt 20 ] || limit=20
   while [ ! -f "$session/done" ]; do
     n=$((n + 1))
-    if [ "$n" -gt "$limit" ]; then
+    if [ "$n" -gt "$ACTION_TIMEOUT" ]; then
       if [ -f "$session/pid" ]; then
         kill_tree "$(cat "$session/pid")"
-        sleep 0.05
+        sleep 1
         kill_tree "$(cat "$session/pid")"
       fi
       printf 'timeout\n' > "$session/stderr"
@@ -246,27 +238,30 @@ shell_run() {
       shell_init "$session" "$wd"
       break
     fi
-    sleep 0.05
+    sleep 1
   done
   out=$session/stdout err=$session/stderr
   st=$(cat "$session/status" 2>/dev/null || echo 1)
   cwd=$(cat "$session/cwd" 2>/dev/null || cat "$session/workdir")
   printf -- '--- stdout ---\n'
-  if [ -s "$out" ]; then
-    n=$(wc -c < "$out" | tr -d ' ')
-    head -c "$MAX_OBS_BYTES" "$out"
-    [ "$n" -le "$MAX_OBS_BYTES" ] || printf '\n[truncated, %s bytes]\n' "$n"
-    echo
-  fi
+  clip_file "$out"
   printf -- '--- stderr ---\n'
-  if [ -s "$err" ]; then
-    n=$(wc -c < "$err" | tr -d ' ')
-    head -c "$MAX_OBS_BYTES" "$err"
-    [ "$n" -le "$MAX_OBS_BYTES" ] || printf '\n[truncated, %s bytes]\n' "$n"
-    echo
-  fi
+  clip_file "$err"
   printf -- '--- exit: %s ---\n' "$st"
   printf -- '--- cwd: %s\n' "$cwd"
+}
+
+clip_file() {
+  f=$1
+  [ -s "$f" ] || return 0
+  n=$(wc -c < "$f" | tr -d ' ')
+  if [ "$n" -le "$MAX_OBS_BYTES" ]; then
+    cat "$f"
+  else
+    dd if="$f" bs="$MAX_OBS_BYTES" count=1 2>/dev/null
+    printf '\n[truncated, %s bytes]\n' "$n"
+  fi
+  echo
 }
 
 # ----------------------------------------------------------------- model
@@ -505,8 +500,9 @@ verify_install() {
   fi
   intro=$(LAUNCH_CWD=$LAUNCH_CWD /bin/sh "$INSTALL/bin/agent" </dev/null 2>&1 || true)
   printf '%s' "$intro" | grep -q '当前目录' || { printf '  FAIL 引导语缺失\n' >&2; bad=$((bad + 1)); }
-  if grep -E '/Users/[^/]+/leehow/code/slab/agent/' "$INSTALL/bin/agent" "$INSTALL/seed.sh" >/dev/null 2>&1; then
-    printf '  FAIL 写死了旧安装路径\n' >&2; bad=$((bad + 1))
+  baked=$(printf '/%s/|/%s/' Users home)
+  if grep -E "$baked" "$INSTALL/bin/agent" "$INSTALL/bin/edit" "$INSTALL/bin/llm" "$INSTALL/bin/shell" >/dev/null 2>&1; then
+    printf '  FAIL shim 写死了本机路径\n' >&2; bad=$((bad + 1))
   fi
   w=$(mktemp -d "${TMPDIR:-/tmp}/seed-ver.XXXXXX")
   w=$(CDPATH= cd "$w" && pwd)
@@ -529,7 +525,6 @@ STUB
     cd "$w"
     SEED_LLM_STUB=$stub SEED_VER_N=$w/n /bin/sh "$INSTALL/bin/agent" --oneshot 'pwd'
   ) > "$w/out" 2> "$w/err"
-  vs=$?
   set -e
   if ! grep -q ok "$w/out"; then
     printf '  FAIL 假 tool_calls 没有跑通\n' >&2; bad=$((bad + 1))
@@ -571,8 +566,6 @@ install_main() {
 
 agent_main() {
   INSTALL=$(CDPATH= cd "$(dirname "$SELF")" && pwd -P)
-  # seed.sh lives in $INSTALL when launched via shim
-  case $SELF in */seed.sh) INSTALL=$(CDPATH= cd "$(dirname "$SELF")" && pwd -P) ;; esac
   load_env
   oneshot=0
   task=
@@ -648,6 +641,10 @@ case ${1:-} in
       resolve_provider "$1" "$2"
       INSTALL=${3:-.}
     else
+      case $1 in
+        deepseek|http*://*)
+          die "第一次需要 key：sh seed.sh deepseek sk-xxxx" 64 ;;
+      esac
       INSTALL=$1
       load_env
       [ -n "${LLM_API_KEY:-}" ] || die "$INSTALL 没有凭据。第一次：sh seed.sh deepseek sk-xxxx" 64

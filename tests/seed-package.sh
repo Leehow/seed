@@ -13,10 +13,10 @@ ck() {
 d=$(mktemp -d "${TMPDIR:-/tmp}/seed-pkg.XXXXXX")
 trap 'rm -rf "$d"' EXIT
 
-if grep -n 'python3\|#!/usr/bin/env python' "$SEED" >/dev/null; then
-  printf 'FAIL seed.sh must not call python\n'; fail=$((fail + 1))
+if grep -n 'python3\|#!/usr/bin/env python\|openai\|gpt-5\|/Users/\|pgrep \|head -c' "$SEED" >/dev/null; then
+  printf 'FAIL seed.sh still has python/openai/host-path/nonportable bits\n'; fail=$((fail + 1))
 else
-  printf 'ok   seed.sh is shell+jq, no python\n'
+  printf 'ok   seed.sh is portable shell+jq\n'
 fi
 
 # SSE assembler must read a file (heredoc must not steal the stream)
@@ -97,13 +97,17 @@ export STUB_N
 printf '0\n' > "$STUB_N"
 (
   cd "$cwd"
-  SEED_LLM_STUB=$stub SEED_SKIP_ACCEPT_FAKE=0 \
+  SEED_LLM_STUB=$stub \
     /bin/sh "$SEED" deepseek sk-TESTKEYNOTREAL "$inst"
 ) > "$d/out" 2> "$d/err" || true
 
 ck "install wrote cwd .env" test -f "$cwd/.env"
 ck "install wrote install .env" test -f "$inst/.env"
-mode=$(stat -f '%OLp' "$cwd/.env" 2>/dev/null || stat -c '%a' "$cwd/.env")
+if mode=$(stat -c '%a' "$cwd/.env" 2>/dev/null); then
+  :
+else
+  mode=$(stat -f '%OLp' "$cwd/.env")
+fi
 ck "cwd .env is 600" test "$mode" = 600
 ck "env has key field" grep -q '^LLM_API_KEY=' "$cwd/.env"
 ck "key not in stderr" awk 'BEGIN{c=0} /sk-TESTKEYNOTREAL/{c=1} END{exit c}' "$d/err"

@@ -13,6 +13,8 @@ sh bin/agent "任务"           # 一次性
 
 工作区是启动 `bin/agent` 时的当前目录。种子装的时候不聊天，只刷 token；产物只显示引导和最后回答。
 
+需要 POSIX 环境：`/bin/sh`、curl、jq。Linux、macOS、WSL、Git Bash 可以；原生 cmd / PowerShell 不行。换机器把仓库拷过去，自己准备 `.env`，不要带着本机绝对路径。
+
 ```sh
 /bin/sh tests/seed-package.sh
 ```

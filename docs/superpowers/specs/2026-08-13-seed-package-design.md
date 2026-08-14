@@ -43,7 +43,7 @@ seed.sh
 sh seed.sh <渠道> <API_KEY> [安装目录]
 ```
 
-- 渠道：`deepseek` | `openai` | 完整 URL
+- 渠道：`deepseek` | 完整 URL
 - 默认安装目录：当前目录（相对**调用 seed 时的当前目录**），产物是 `bin/agent`
 - 续跑：`sh seed.sh [安装目录]`，凭据从 `.env` 读，不再要求把 key 写在命令行
 
@@ -84,7 +84,7 @@ LLM_API_KEY=sk-...
 - 同一段会话共用该进程：`cd`、`export`、虚拟环境下一轮还在。
 - 种子装的过程 = 一段会话。`bin/agent` 从打开到退出 = 一段会话。两条任务之间若在同一次 `bin/agent` 进程里，也共用这个 shell。
 - stdin 关掉，避免命令停着等输入。
-- 超时、输出截断按本机写：有 `timeout(1)` 用它，macOS 用 perl alarm。默认超时 180s，输出上限 16KiB，超出标明截断。
+- 超时、输出截断用 POSIX `sleep`/`dd`/`ps`，不依赖 `timeout(1)`、perl、python。默认超时 180s，输出上限 16KiB，超出标明截断。
 - 种子按本机特化出这个工具之后，**自己立刻用它**，再把同一份写到 `$INSTALL/bin/`。
 
 ### 6.2 edit（精确替换）
@@ -113,7 +113,7 @@ SSE：不把 content / reasoning 打到终端。解析完整 JSON（或先把 SS
 
 **种子 SYSTEM**：你是安装器，不是聊天窗口。只能 tool_calls 调持久 shell 和 edit。按当前机器特化这两个工具，写出交互版 `bin/agent`（同一对工具、同一个 loop）。产物工作区必须是「调用时的当前目录」，禁止写死路径。不要口头宣称装好。
 
-**种子 TASK**：安装到 `$INSTALL`。带上本机探测结果（os、shell 路径、jq、有无 timeout）。
+**种子 TASK**：安装到 `$INSTALL`。带上本机探测结果（os、shell 路径、jq）。
 
 **产物打开时的引导（中文，短）**：能在当前目录改文件、跑命令；建议先看再改、改完自己检查。然后 `>` 等输入。空行或 Ctrl-D 退出。
 
