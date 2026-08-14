@@ -1,0 +1,10 @@
+.env
+.agent-runs/
+.runs/
+.agent/
+.seed/
+.shell-agent/
+.shell-agent.extension.install-*
+.pi/
+.tmp/
+.DS_Store

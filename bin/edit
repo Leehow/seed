@@ -1,0 +1,2 @@
+#!/bin/sh
+exec /bin/sh "$(CDPATH= cd "$(dirname "$0")/.." && pwd -P)/seed.sh" --edit "$@"
