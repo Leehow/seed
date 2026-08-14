@@ -1,23 +1,50 @@
 {
-  "prompt": "Initialize the machine index. The empty JSON tree is already at the Machine index path from the system message. Use shell and jq (or edit). For each key in system.tools, set present from command -v and path to that command when found. Record discovered skill directories in system.skills as {path, note} only — do not copy skill bodies. Put leftovers in system.other. Do not scan project source into the memory tree. When done, set ready to true and updated to a UTC timestamp. Then stop with no more tool_calls.",
+  "prompt": "Initialize the machine index at the Machine index path from the system message. Use shell and jq (or edit).\nKeep system.retrieve exactly as the template wording unless it is empty. It must say the task is the human's last message, jq this index, Never cat the entire index, match ok skills by name/description/path, then cat that directory's SKILL.md and follow it using only shell and edit. If the task needs a URL or current web facts, jq system.web for ok fetch and follow that entry's use field via the shell tool. When opening a page, use the human's words and URLs first; do not rewrite into local path names; for skill or SKILL.md questions fetch https://agentskills.io/specification. Do not weaken or delete retrieve. Do not copy skill bodies into the tree.\nOrder is mandatory:\n1) For each key in system.tools: set present and the JSON path field from command -v. Never assign a shell variable named path (it breaks zsh). Use bin or pth. If present, run a cheap smoke that prints a token (sh -c 'echo sh_ok'; curl --version; jq -n .; rg --version; git --version; python --version). Set ok true when that test exits 0. Empty stdout with exit 0 is success. Do not debug the shell. Otherwise ok false and a short note.\n2) Keep system.web.fetch and its use text. It is a prompt tool (shell + curl), not a new API tool. If curl is ok, smoke GET https://example.com with connect-timeout 5; set fetch.ok true only on HTTP 2xx. On failure set ok false and a short note. Do not add a search-engine slot.\n3) Write the index to disk NOW with ready true and updated set to a UTC timestamp. Empty skills and other arrays are acceptable. Do not leave ready false while exploring. Do not inspect skills before this write.\n4) Optional, only after ready is true: leftover commands that pass a smoke test may go in system.other as {name, path, ok, note}. Skill directories (for example $HOME/.claude/skills, $HOME/.codex/skills, $HOME/.agents/skills if they exist) may be scanned in ONE shell script: one entry per skill folder, not the parent; name from SKILL.md YAML name: if present, else the directory basename; description from SKILL.md YAML description: if present, else the first heading, one line; note with file count or why not; ok true only if the directory is readable and contains at least one file. Write skills once with jq. Do not cat one SKILL.md per turn. If this cannot finish in one or two shell calls, skip skills and stop.\n5) Do not scan project source into the memory tree. Then stop with no more tool_calls.\nDo not change or delete the top-level host object. The host writes that branch after ready.\nIncomplete skills must not block ready.",
   "machine_tree": {
     "ready": false,
     "version": "1",
     "updated": "",
     "system": {
+      "retrieve": "The task is the human's last message. Do not replace it with index key names. A skill catalog may already be in the system message; match name and description there first. Never cat the entire index. jq this index for ok entries that match the human's words. Match ok skills by name, description, or path; if one matches, cat that directory's SKILL.md and follow it using only shell and edit. If the task needs a URL or current web facts, jq system.web for ok fetch and follow that entry's use field via the shell tool. Open pages with the human's words and URLs first. Do not rewrite the query into local path names (agent-store, catalog.json, init.json). For skill or SKILL.md questions, fetch https://agentskills.io/specification first; do not search using local path names. If the human asks about this machine, its config, home directory, or which projects exist, jq the top-level host object. Do not rewrite that ask into internal path names. Use ok system.tools and system.other via the shell tool; they are not new API tools. Do not copy skill bodies into the tree.",
       "tools": {
-        "sh": { "present": false, "path": "" },
-        "curl": { "present": false, "path": "" },
-        "jq": { "present": false, "path": "" },
-        "rg": { "present": false, "path": "" },
-        "git": { "present": false, "path": "" },
-        "python": { "present": false, "path": "" }
+        "sh": { "present": false, "path": "", "ok": false, "note": "" },
+        "curl": { "present": false, "path": "", "ok": false, "note": "" },
+        "jq": { "present": false, "path": "", "ok": false, "note": "" },
+        "rg": { "present": false, "path": "", "ok": false, "note": "" },
+        "git": { "present": false, "path": "", "ok": false, "note": "" },
+        "python": { "present": false, "path": "", "ok": false, "note": "" }
+      },
+      "web": {
+        "fetch": {
+          "ok": false,
+          "name": "fetch",
+          "description": "Fetch a URL as text via curl.",
+          "use": "Prompt tool, not an API tool. Via shell: curl -sS -L --connect-timeout 15 --max-time 60 -A slab-agent/1 -- URL. If the type is binary (image, pdf, zip, octet-stream), do not dump the body. Prefer text, HTML, JSON, markdown. Truncate huge output (head). Then read the result.",
+          "note": ""
+        }
       },
       "skills": [],
       "other": []
     },
     "ours": {
       "plugins": ["init"]
+    },
+    "host": {
+      "ok": false,
+      "kind": "",
+      "os": "",
+      "arch": "",
+      "release": "",
+      "cpu": "",
+      "mem": "",
+      "disk": "",
+      "user": "",
+      "home": "",
+      "home_top": [],
+      "projects": [],
+      "write": { "home": false, "workspace": false },
+      "sudo": false,
+      "note": ""
     }
   },
   "memory_tree": {

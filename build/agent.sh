@@ -1,7 +1,12 @@
 agent_main() {
   INSTALL=$(product_root)
+  ensure_jq
   load_env
+  disable_thinking
   agent_ensure_init
+  SEED_STREAM=1
+  SEED_STREAM_PRINT=1
+  export SEED_STREAM SEED_STREAM_PRINT
   oneshot=0
   task=
   if [ "${1:-}" = --oneshot ]; then
@@ -24,6 +29,7 @@ agent_main() {
   run_loop "$(product_system)" "$task" "$sess" "$ev" "$AGENT_MAX_ROUNDS" 1
   as=$?
   set -e
+  last_msgs=$ev/messages.json
   if [ "$oneshot" -eq 1 ]; then
     shell_stop "$sess"
     exit "$as"
@@ -35,11 +41,15 @@ agent_main() {
     evn=$((evn + 1))
     ev=${AGENT_RUNS_DIR:-$PWD/.agent-runs}/$(date -u +%Y%m%dT%H%M%SZ)-$$-$evn
     mkdir -p "$ev"
+    if [ -s "$last_msgs" ]; then
+      strip_msg_thinking "$last_msgs" "$ev/messages.json"
+    fi
     if [ ! -f "$sess/alive" ]; then
       sess=$ev/session
       shell_init "$sess" "$PWD"
     fi
     run_loop "$(product_system)" "$line" "$sess" "$ev" "$AGENT_MAX_ROUNDS" 1 || :
+    last_msgs=$ev/messages.json
   done
   shell_stop "$sess" 2>/dev/null || :
 }
@@ -52,10 +62,13 @@ selftest() {
 
 case ${1:-} in
   --parse-turn) shift; parse_turn "$1"; exit 0 ;;
+  --parse-stream) shift; parse_stream "$1"; exit 0 ;;
   --llm) shift; llm_main "$@"; exit 0 ;;
   --edit) shift; edit_main "$@"; exit 0 ;;
+  --ensure-jq) ensure_jq; exit 0 ;;
   --update)
     INSTALL=$(product_root)
+    ensure_jq
     load_env
     agent_update
     exit 0 ;;
@@ -76,6 +89,7 @@ fi
 INSTALL=.
 case ${1:-} in
   '')
+    ensure_jq
     load_env
     [ -n "${LLM_API_KEY:-}" ] || die "first run: sh seed.sh deepseek <API_KEY>" 64
     LLM_PROVIDER=${LLM_PROVIDER:-deepseek}
@@ -84,6 +98,7 @@ case ${1:-} in
   -*) usage; exit 64 ;;
   *)
     [ "$#" -eq 2 ] || { usage; exit 64; }
+    ensure_jq
     resolve_provider "$1" "$2" ;;
 esac
 mkdir -p "$INSTALL"

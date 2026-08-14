@@ -75,11 +75,12 @@ STUB
 }
 
 install_main() {
-  need jq
+  ensure_jq
   write_env_file "$LAUNCH_CWD/.env"
   write_env_file "$INSTALL/.env"
   ensure_gitignore "$LAUNCH_CWD"
   write_shims
   verify_install
-  printf 'installed: %s/bin/agent\n' "$INSTALL" >&2
+  printf 'installed: bin/agent\n' >&2
+  printf 'open: sh bin/agent\n' >&2
 }

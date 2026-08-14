@@ -1,4 +1,7 @@
 .env
+plugins/jq/jq-linux-*
+plugins/jq/jq-macos-*
+plugins/jq/jq-windows-*
 .agent-runs/
 agent-store/
 .agent-memory/
@@ -10,3 +13,5 @@ agent-store/
 .pi/
 .tmp/
 .DS_Store
+bin/jq
+bin/jq.exe

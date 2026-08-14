@@ -9,7 +9,7 @@
 
 种子只负责安装：拉 seed plugin（渠道 / 多模型），写出产物，验磁盘，然后歇。人不再跑 `sh seed.sh`，除非删了产物要重来。
 
-人打开的是产物。第一次打开要自动拉 agent plugin、按我们事先设计好的 JSON 树扫机器、建好知识 / 记忆 / 索引入口，然后才出现 `>`。之后不频繁重扫。`rg`、别人的 skill、websearch 只是树上的可用命令，不升格成新 `tool_calls`。
+人打开的是产物。第一次打开要自动拉 agent plugin、按我们事先设计好的 JSON 树扫机器、建好知识 / 记忆 / 索引入口，然后才出现 `>`。之后不频繁重扫。`rg`、别人的 skill、fetch 只是树上的可用命令，不升格成新 `tool_calls`。
 
 ## 2. 两层
 
@@ -17,7 +17,7 @@
 |---|---|---|
 | 何时 | 安装 | 人 `sh bin/agent` 之后 |
 | 拉什么 | 只拉 seed plugin（models） | 只拉 agent plugin |
-| 对人 | `installed:` / `error:` | 首次：`initializing:`，然后 `>`；已就绪：直接 `>` |
+| 对人 | `installed:` / `error:` | 首次：`initializing:`，然后 `>`；已就绪：直接 `>`。同一窗口里后一句带着前面的 messages |
 | loop | 打包源，安装时复制出去 | 自带一份，不再 `exec` 回 `seed.sh` |
 | 工作区 | 安装目录 | 启动时的 `$PWD` |
 
@@ -33,7 +33,7 @@
 
 装完可以删掉原来的 `seed.sh`，`bin/agent` 仍能跑。`bin/agent` 用 `dirname` 算安装目录，禁止把 `/Users/`、`/home/` 写进产物。
 
-不恢复 SSE。初始化只打一行 `initializing:`，不刷思考、不刷 token。
+产物走 SSE：初始化先打 `initializing:`，之后每一轮对话也把模型正在生成的正文打到 stderr，免得人以为卡死。只打 `content`，不打 thinking / `reasoning_content`，也不把这些字段写进下一轮 messages。安装器仍不叫模型。模型不改 `bin/agent` 的 loop。
 
 ## 4. 第一次打开
 
@@ -71,7 +71,7 @@ oneshot 若尚未 `ready`：先走 1–6，再做那条任务。
 
 ## 5. 目录和预置树
 
-都是 JSON。不执行远程 shell。相对路径相对该文件所在目录。
+目录和 init 包是 JSON。`hooks` 列出的脚本先落到 `agent-store/plugins/`，再跑本地文件；不把远程正文直接 pipe 给 sh。相对路径相对该文件所在目录。
 
 `<根>/agent/index.json`：
 
@@ -82,7 +82,11 @@ oneshot 若尚未 `ready`：先走 1–6，再做那条任务。
   "required": {
     "init": "init.json"
   },
-  "optional": {}
+  "optional": {},
+  "hooks": {
+    "after_ready": ["host.sh"],
+    "system": ["host.sh"]
+  }
 }
 ```
 
@@ -108,13 +112,17 @@ oneshot 若尚未 `ready`：先走 1–6，再做那条任务。
   "version": "1",
   "updated": "",
   "system": {
+    "retrieve": "Before acting, jq this index for ok matches. Never cat the entire index. Matching ok skills: cat SKILL.md; follow with shell/edit only.",
     "tools": {
-      "sh":     { "present": false, "path": "" },
-      "curl":   { "present": false, "path": "" },
-      "jq":     { "present": false, "path": "" },
-      "rg":     { "present": false, "path": "" },
-      "git":    { "present": false, "path": "" },
-      "python": { "present": false, "path": "" }
+      "sh":     { "present": false, "path": "", "ok": false, "note": "" },
+      "curl":   { "present": false, "path": "", "ok": false, "note": "" },
+      "jq":     { "present": false, "path": "", "ok": false, "note": "" },
+      "rg":     { "present": false, "path": "", "ok": false, "note": "" },
+      "git":    { "present": false, "path": "", "ok": false, "note": "" },
+      "python": { "present": false, "path": "", "ok": false, "note": "" }
+    },
+    "web": {
+      "fetch": { "ok": false, "name": "fetch", "description": "Fetch a URL as text via curl.", "use": "...", "note": "" }
     },
     "skills": [],
     "other": []
@@ -136,7 +144,9 @@ oneshot 若尚未 `ready`：先走 1–6，再做那条任务。
 }
 ```
 
-初始化 prompt 只要求：用 `command -v` 填 `system.tools`；找到的 skill 目录记进 `skills`（路径 + 一句话，不把别人的 skill 正文烤进树）；预置槽装不下的进 `other`；填完把机器树 `ready` 设为 `true`，写 `updated`。不扫项目源代码来填记忆树。
+初始化 prompt 要求：写好 / 保留 `system.retrieve`；用 `command -v` 填 `system.tools`；对每个找到的命令做一次便宜的冒烟测试，只有退出码 0 才把 `ok` 设为 `true`，否则 `ok` 为 `false` 并写 `note`。保留 `system.web.fetch` 和它的 `use`；curl 可用时对 example.com 做一次便宜 GET，HTTP 2xx 才 `ok`。不再保留 websearch 槽。**tools + fetch 写完立刻把机器树 `ready` 设为 `true`**，空的 `skills` 可以。skill 一条一个目录，记 `{name, description, path, ok, note}`：`name` / `description` 从 `SKILL.md` 头抽取，不把正文烤进树；只在 ready 之后用一条脚本尽量扫，扫不完不挡门。预置槽装不下、但测过能用的进 `other`。不扫项目源代码来填记忆树。
+
+SYSTEM 先钉住人的原话（任务就是上一句，不要换成树上的键名），再读机器树并遵守 `system.retrieve`。宿主把 ok skill 的 name+description 写成 `<available_skills>` 附在 SYSTEM 上。问 skill / SKILL.md 时先打开 https://agentskills.io/specification。人问有什么工具 / 能用什么时：再列出（1）API 工具 shell 和 edit，（2）`system.retrieve` 说能用的 `ok` 条目。只答 shell/edit 不算。fetch 只写在 init plugin 的树上，是提示词工具：模型按 `use` 用 shell + curl 执行，不升格成新 `tool_calls`，种子不点名。
 
 检索：`jq` 查固定枝。缺枝就缺。以后加槽：改 plugin 包模板和目录 `version`，不改 loop。
 
@@ -144,9 +154,9 @@ oneshot 若尚未 `ready`：先走 1–6，再做那条任务。
 
 - 机器树是 JSON
 - 顶层有 `ready`、`version`、`system`、`ours`
-- `system` 下有 `tools`、`skills`、`other`
+- `system` 下有 `tools`、`skills`、`other`、非空字符串 `retrieve`
 - `ready` 为 JSON `true`
-- 预置的六个 tool 键还在
+- 预置的六个 tool 键还在，且每项有 `ok` / `present` / `path`
 
 多出来的键可以留。删掉预置枝名 = 失败。
 
@@ -191,10 +201,10 @@ oneshot 若尚未 `ready`：先走 1–6，再做那条任务。
 
 ## 9. 明确不做（这轮）
 
-- 不执行远程 plugin shell
+- 不把远程 plugin 正文直接 pipe 给 sh（hooks 只跑已缓存的本地文件）
 - 不加第三种 `tool_calls`（没有 `retrieve`，没有把 `rg` / skill 升格成工具）
 - 不让模型改 `bin/agent` 的 loop
-- 不恢复 SSE / token 心跳
+- 不让模型自己写 SSE；流式由外壳打开，且不把 thinking 打到终端或攒进上下文
 - 不加载 `optional`
 - 不在每次打开时重拉目录、不自动重扫机器
 - 安装期不拉 agent plugin、不叫模型

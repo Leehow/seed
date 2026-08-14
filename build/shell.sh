@@ -7,23 +7,30 @@ shell_init() {
   cat > "$session/worker.sh" <<'EOS'
 #!/bin/sh
 SESSION=$1
-cd "$(cat "$SESSION/workdir")" || exit 70
+WORKER_PATH=$PATH
+SLEEP=$(command -v sleep 2>/dev/null || echo /bin/sleep)
+CAT=$(command -v cat 2>/dev/null || echo /bin/cat)
+RM=$(command -v rm 2>/dev/null || echo /bin/rm)
+cd "$($CAT "$SESSION/workdir")" || exit 70
 while [ -f "$SESSION/alive" ]; do
   if [ ! -f "$SESSION/request" ]; then
-    sleep 0.05 2>/dev/null || sleep 1
+    "$SLEEP" 0.05 2>/dev/null || "$SLEEP" 1
     continue
   fi
-  cmd=$(cat "$SESSION/request")
-  rm -f "$SESSION/request" "$SESSION/done"
+  cmd=$($CAT "$SESSION/request")
+  $RM -f "$SESSION/request" "$SESSION/done"
   eval "$cmd" > "$SESSION/stdout" 2> "$SESSION/stderr"
   echo $? > "$SESSION/status"
   pwd > "$SESSION/cwd"
+  if ! command -v sleep >/dev/null 2>&1; then
+    PATH=$WORKER_PATH
+    export PATH
+  fi
   : > "$SESSION/done"
 done
 EOS
-  USER_SHELL=${USER_SHELL:-${SHELL:-/bin/sh}}
-  # Detach stdio so a parent $(...) cannot hang on this worker.
-  "$USER_SHELL" "$session/worker.sh" "$session" \
+  # Always /bin/sh. zsh ties `path` to PATH; models write path=$(command -v).
+  /bin/sh "$session/worker.sh" "$session" \
     </dev/null >"$session/worker.out" 2>"$session/worker.err" &
   echo $! > "$session/pid"
 }

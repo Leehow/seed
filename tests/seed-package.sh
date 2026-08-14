@@ -14,6 +14,7 @@ d=$(mktemp -d "${TMPDIR:-/tmp}/seed-pkg.XXXXXX")
 PLUGIN_PID=
 cleanup() {
   [ -n "${PLUGIN_PID:-}" ] && kill "$PLUGIN_PID" 2>/dev/null || true
+  [ -n "${JQ_PID:-}" ] && kill "$JQ_PID" 2>/dev/null || true
   rm -rf "$d"
 }
 trap cleanup EXIT
@@ -28,6 +29,143 @@ do
 done
 ck "agent plugin index" test -f "$ROOT/plugins/agent/index.json"
 ck "agent plugin init" test -f "$ROOT/plugins/agent/init.json"
+ck "jq mirror fetch script" test -f "$ROOT/plugins/jq/fetch.sh"
+if grep -q 'follow system.retrieve' "$BUILD/prompts/product-system.txt" \
+  && grep -q 'not cat of the whole file' "$BUILD/prompts/product-system.txt"; then
+  printf 'ok   product points at retrieve protocol\n'
+else
+  printf 'FAIL product points at retrieve protocol\n'; fail=$((fail + 1))
+fi
+if grep -q 'same language the human just used' "$BUILD/prompts/product-system.txt"; then
+  printf 'ok   product replies in the human language\n'
+else
+  printf 'FAIL product replies in the human language\n'; fail=$((fail + 1))
+fi
+if grep -q 'Model:' "$BUILD/product.sh" \
+  && grep -A8 'agent_ensure_init' "$BUILD/agent.sh" | grep -q 'SEED_STREAM_PRINT=1'; then
+  printf 'ok   product names model and restores SSE after init\n'
+else
+  printf 'FAIL product names model and restores SSE after init\n'; fail=$((fail + 1))
+fi
+if jq -e '.machine_tree.system.retrieve | type=="string" and length>20' \
+  "$ROOT/plugins/agent/init.json" >/dev/null 2>&1 \
+  && jq -r '.machine_tree.system.retrieve' "$ROOT/plugins/agent/init.json" \
+    | grep -q 'Never cat the entire index'; then
+  printf 'ok   init tree has retrieve protocol\n'
+else
+  printf 'FAIL init tree has retrieve protocol\n'; fail=$((fail + 1))
+fi
+if jq -r '.prompt' "$ROOT/plugins/agent/init.json" | grep -q description \
+  && jq -r '.prompt' "$ROOT/plugins/agent/init.json" | grep -q SKILL.md; then
+  printf 'ok   init prompt extracts skill metadata\n'
+else
+  printf 'FAIL init prompt extracts skill metadata\n'; fail=$((fail + 1))
+fi
+if jq -e '.version=="15"' "$ROOT/plugins/agent/index.json" >/dev/null 2>&1; then
+  printf 'ok   agent plugin version 15\n'
+else
+  printf 'FAIL agent plugin version 15\n'; fail=$((fail + 1))
+fi
+if jq -e '.machine_tree.host | type=="object" and has("ok") and has("projects") and has("home_top")' \
+  "$ROOT/plugins/agent/init.json" >/dev/null 2>&1; then
+  printf 'ok   init tree has empty host map\n'
+else
+  printf 'FAIL init tree has empty host map\n'; fail=$((fail + 1))
+fi
+if grep -qE 'host_inventory|host_blurb|home_top' "$BUILD/product.sh" \
+  || grep -q 'host object' "$BUILD/prompts/product-system.txt"; then
+  printf 'FAIL seed does not embed host map\n'; fail=$((fail + 1))
+else
+  printf 'ok   seed does not embed host map\n'
+fi
+if [ -f "$ROOT/plugins/agent/host.sh" ] \
+  && grep -q home_top "$ROOT/plugins/agent/host.sh" \
+  && jq -e '.hooks.after_ready | index("host.sh")' \
+    "$ROOT/plugins/agent/index.json" >/dev/null 2>&1 \
+  && grep -q 'agent_run_hooks' "$BUILD/product.sh"; then
+  printf 'ok   host map lives in agent plugin\n'
+else
+  printf 'FAIL host map lives in agent plugin\n'; fail=$((fail + 1))
+fi
+if grep -q 'old tool output cleared' "$BUILD/product.sh" \
+  || grep -q 'CONTEXT COMPACTION' "$BUILD/product.sh" \
+  || grep -q 'CONTEXT COMPACTION' "$BUILD/prompts/product-system.txt"; then
+  printf 'FAIL seed does not embed compact\n'; fail=$((fail + 1))
+else
+  printf 'ok   seed does not embed compact\n'
+fi
+if [ -f "$ROOT/plugins/agent/compact.sh" ] \
+  && grep -q 'old tool output cleared' "$ROOT/plugins/agent/compact.sh" \
+  && jq -e '.hooks.after_turn | index("compact.sh")' \
+    "$ROOT/plugins/agent/index.json" >/dev/null 2>&1 \
+  && grep -q 'agent_after_turn' "$BUILD/product.sh"; then
+  printf 'ok   compact lives in agent plugin\n'
+else
+  printf 'FAIL compact lives in agent plugin\n'; fail=$((fail + 1))
+fi
+if grep -q "The task is the human's last message" "$BUILD/prompts/product-system.txt" \
+  && grep -q 'Do not replace it with' "$BUILD/prompts/product-system.txt" \
+  && grep -q 'agentskills.io/specification' "$BUILD/prompts/product-system.txt"; then
+  printf 'ok   product pins human task and skill spec\n'
+else
+  printf 'FAIL product pins human task and skill spec\n'; fail=$((fail + 1))
+fi
+if grep -q 'skill_catalog' "$BUILD/product.sh" \
+  && grep -q 'available_skills' "$BUILD/product.sh"; then
+  printf 'ok   host injects skill catalog\n'
+else
+  printf 'FAIL host injects skill catalog\n'; fail=$((fail + 1))
+fi
+if jq -r '.machine_tree.system.retrieve' "$ROOT/plugins/agent/init.json" \
+    | grep -q 'agentskills.io/specification' \
+  && jq -r '.machine_tree.system.retrieve' "$ROOT/plugins/agent/init.json" \
+    | grep -q 'Do not rewrite the query' \
+  && jq -r '.machine_tree.system.retrieve' "$ROOT/plugins/agent/init.json" \
+    | grep -q "The task is the human's last message" \
+  && ! jq -r '.machine_tree.system.retrieve' "$ROOT/plugins/agent/init.json" \
+    | grep -q websearch \
+  && jq -r '.machine_tree.system.retrieve' "$ROOT/plugins/agent/init.json" \
+    | grep -q 'top-level host'; then
+  printf 'ok   retrieve keeps human web queries\n'
+else
+  printf 'FAIL retrieve keeps human web queries\n'; fail=$((fail + 1))
+fi
+if jq -r '.prompt' "$ROOT/plugins/agent/init.json" | grep -q 'Never assign a shell variable named path' \
+  && jq -r '.prompt' "$ROOT/plugins/agent/init.json" | grep -q 'Empty stdout with exit 0 is success'; then
+  printf 'ok   init prompt does not clobber PATH\n'
+else
+  printf 'FAIL init prompt does not clobber PATH\n'; fail=$((fail + 1))
+fi
+if jq -e '.machine_tree.system.web.fetch.use' "$ROOT/plugins/agent/init.json" >/dev/null 2>&1 \
+  && ! jq -e '.machine_tree.system.web | has("websearch")' \
+    "$ROOT/plugins/agent/init.json" >/dev/null 2>&1; then
+  printf 'ok   init tree has fetch and no websearch\n'
+else
+  printf 'FAIL init tree has fetch and no websearch\n'; fail=$((fail + 1))
+fi
+if jq -r '.prompt' "$ROOT/plugins/agent/init.json" | grep -q 'Write the index to disk NOW' \
+  && jq -r '.prompt' "$ROOT/plugins/agent/init.json" | grep -q 'Do not inspect skills before this write'; then
+  printf 'ok   init writes ready before skills\n'
+else
+  printf 'FAIL init writes ready before skills\n'; fail=$((fail + 1))
+fi
+if jq -e '.machine_tree.system.web.fetch.use' \
+  "$ROOT/plugins/agent/init.json" >/dev/null 2>&1 \
+  && jq -r '.machine_tree.system.retrieve' "$ROOT/plugins/agent/init.json" \
+    | grep -q system.web \
+  && jq -r '.prompt' "$ROOT/plugins/agent/init.json" \
+    | grep -q 'Keep system.web.fetch' \
+  && ! jq -r '.prompt' "$ROOT/plugins/agent/init.json" | grep -q websearch; then
+  printf 'ok   init tree has prompt fetch only\n'
+else
+  printf 'FAIL init tree has prompt fetch only\n'; fail=$((fail + 1))
+fi
+if grep -q 'system.web\|websearch' "$BUILD/prompts/product-system.txt" \
+  || grep -q 'system.web\|websearch' "$BUILD/product.sh"; then
+  printf 'FAIL seed does not name plugin web tools\n'; fail=$((fail + 1))
+else
+  printf 'ok   seed does not name plugin web tools\n'
+fi
 ck "no installer prompt" test ! -f "$BUILD/prompts/installer-system.txt"
 ck "no installer task" test ! -f "$BUILD/prompts/installer-task.txt"
 if [ -f "$BUILD/pack.sh" ]; then
@@ -69,10 +207,26 @@ if LC_ALL=C grep -n '[^	 -~]' "$SEED" >/dev/null; then
 else
   printf 'ok   seed.sh is ASCII-only\n'
 fi
-if grep -n 'assemble_stream\|stream:true\|--assemble\|cabin_system' "$SEED" >/dev/null; then
-  printf 'FAIL seed has no SSE or install-model loop\n'; fail=$((fail + 1))
+if grep -q 'ensure_jq' "$SEED" && grep -q 'jqlang/jq' "$SEED" \
+  && grep -q '/jq/' "$SEED"; then
+  printf 'ok   seed can fetch jq\n'
 else
-  printf 'ok   seed has no SSE or install-model loop\n'
+  printf 'FAIL seed can fetch jq\n'; fail=$((fail + 1))
+fi
+if grep -q 'parse_stream' "$SEED" && grep -q 'SEED_STREAM' "$SEED"; then
+  printf 'ok   product can assemble SSE\n'
+else
+  printf 'FAIL product can assemble SSE\n'; fail=$((fail + 1))
+fi
+if grep -q 'delta.reasoning_content' "$SEED"; then
+  printf 'FAIL product does not stream thinking\n'; fail=$((fail + 1))
+else
+  printf 'ok   product does not stream thinking\n'
+fi
+if grep -q 'cabin_system' "$SEED"; then
+  printf 'FAIL seed has no install-model loop\n'; fail=$((fail + 1))
+else
+  printf 'ok   seed has no install-model loop\n'
 fi
 
 # one-shot API JSON -> internal turn (no SSE)
@@ -86,6 +240,23 @@ if printf '%s' "$parsed" | grep -q 'pwd'; then printf 'ok   parse-turn keeps arg
 else printf 'FAIL parse-turn keeps arguments\n'; fail=$((fail + 1)); fi
 if printf '%s' "$parsed" | grep -q '"prompt_tokens": 4'; then printf 'ok   parse-turn keeps usage\n'
 else printf 'FAIL parse-turn keeps usage\n'; fail=$((fail + 1)); fi
+
+cat > "$d/sse.txt" <<'SSE'
+data: {"choices":[{"delta":{"content":"hi"}}]}
+data: {"choices":[{"delta":{"content":"!"}}]}
+data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"c1","function":{"name":"shell","arguments":"{\"command\":"}}]}}]}
+data: {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"\"pwd\"}"}}]}}]}
+data: {"usage":{"prompt_tokens":4,"completion_tokens":2}}
+data: [DONE]
+
+SSE
+sp=$(/bin/sh "$SEED" --parse-stream "$d/sse.txt")
+if printf '%s' "$sp" | grep -q '"content": "hi!"'; then printf 'ok   parse-stream joins content\n'
+else printf 'FAIL parse-stream joins content\n'; fail=$((fail + 1)); fi
+if printf '%s' "$sp" | grep -q '"name": "shell"'; then printf 'ok   parse-stream joins tool name\n'
+else printf 'FAIL parse-stream joins tool name\n'; fail=$((fail + 1)); fi
+if printf '%s' "$sp" | grep -q 'pwd'; then printf 'ok   parse-stream joins tool arguments\n'
+else printf 'FAIL parse-stream joins tool arguments\n'; fail=$((fail + 1)); fi
 
 # --edit: unique replace
 printf 'line one\nline two\nline three\n' > "$d/f.txt"
@@ -120,6 +291,29 @@ after=$(SEED_ACTION_TIMEOUT=5 /bin/sh "$SEED" --shell "$sess2" "printf ready\n")
 if printf '%s' "$after" | grep -q ready; then printf 'ok   shell works after timeout\n'
 else printf 'FAIL shell works after timeout\n'; fail=$((fail + 1)); fi
 /bin/sh "$SEED" --shell-stop "$sess2" >/dev/null 2>&1 || :
+
+# zsh treats `path` as PATH; a model init script must not kill the worker
+sess3=$d/sess3
+old_shell=$SHELL
+SHELL=/bin/zsh
+export SHELL
+ck "shell-init under zsh env" /bin/sh "$SEED" --shell-init "$sess3" "$d"
+path_out=$(/bin/sh "$SEED" --shell "$sess3" 'path=$(command -v sh); command -v sleep; printf PATHOK\n')
+if printf '%s' "$path_out" | grep -q PATHOK \
+  && printf '%s' "$path_out" | grep -q 'exit: 0'; then
+  printf 'ok   shell survives path= assignment\n'
+else
+  printf 'FAIL shell survives path= assignment\n'; fail=$((fail + 1))
+fi
+alive_out=$(/bin/sh "$SEED" --shell "$sess3" 'command -v sleep && printf stillalive\n')
+if printf '%s' "$alive_out" | grep -q stillalive; then
+  printf 'ok   shell still works after path=\n'
+else
+  printf 'FAIL shell still works after path=\n'; fail=$((fail + 1))
+fi
+/bin/sh "$SEED" --shell-stop "$sess3" >/dev/null 2>&1 || :
+SHELL=$old_shell
+export SHELL
 
 # install must not call the model
 stub=$d/stub
@@ -166,11 +360,26 @@ else
 fi
 ck "cwd .env is 600" test "$mode" = 600
 ck "env has key field" grep -q '^LLM_API_KEY=' "$cwd/.env"
+if grep '^LLM_EXTRA=' "$cwd/.env" | grep -q enabled; then
+  printf 'FAIL deepseek extra does not enable thinking\n'; fail=$((fail + 1))
+else
+  printf 'ok   deepseek extra does not enable thinking\n'
+fi
 ck "key not in stderr" awk 'BEGIN{c=0} /sk-TESTKEYNOTREAL/{c=1} END{exit c}' "$d/err"
 ck "key not in stdout" awk 'BEGIN{c=0} /sk-TESTKEYNOTREAL/{c=1} END{exit c}' "$d/out"
 ck "gitignore mentions .env" grep -qx '.env' "$cwd/.gitignore"
 if grep -q 'installed:' "$d/err"; then printf 'ok   stub install verified\n'
 else printf 'FAIL stub install verified\n'; fail=$((fail + 1)); fi
+if grep -q 'open: sh bin/agent' "$d/err"; then
+  printf 'ok   install tells how to open\n'
+else
+  printf 'FAIL install tells how to open\n'; fail=$((fail + 1))
+fi
+if grep -q 'installing: jq' "$d/err"; then
+  printf 'FAIL install does not fetch jq when present\n'; fail=$((fail + 1))
+else
+  printf 'ok   install does not fetch jq when present\n'
+fi
 if grep -E '装好了|错误：|验收挂了' "$d/err" >/dev/null; then
   printf 'FAIL seed install stayed machine-English\n'; fail=$((fail + 1))
 else
@@ -224,7 +433,175 @@ mkdir -p "$work"
 ) > "$d/one.out" 2> "$d/one.err" || true
 if grep -q 'done' "$d/one.out"; then printf 'ok   oneshot final answer only-ish\n'
 else printf 'FAIL oneshot final answer only-ish\n'; fail=$((fail + 1)); fi
+if grep -q 'shell: pwd' "$d/one.err"; then
+  printf 'ok   oneshot shows shell line\n'
+else
+  printf 'FAIL oneshot shows shell line\n'; fail=$((fail + 1))
+fi
+if grep -q 'tool_call_id' "$work/.agent-runs"/*/messages.json; then
+  printf 'ok   oneshot keeps tool results in messages\n'
+else
+  printf 'FAIL oneshot keeps tool results in messages\n'; fail=$((fail + 1))
+fi
+# host injects ok skill name+description into SYSTEM; not-ok stays out
+mkdir -p "$cwd/agent-store"
+cat > "$cwd/agent-store/index.json" <<'JSON'
+{
+  "ready": true,
+  "version": "1",
+  "system": {
+    "retrieve": "x",
+    "skills": [
+      {
+        "name": "pdf-demo",
+        "description": "Extract text from PDF files. Use when working with PDFs.",
+        "path": "/tmp/pdf-demo",
+        "ok": true,
+        "note": ""
+      },
+      {
+        "name": "hidden-no",
+        "description": "should not appear",
+        "path": "/tmp/no",
+        "ok": false,
+        "note": ""
+      }
+    ]
+  }
+}
+JSON
+cat > "$stub" <<'EOF'
+#!/bin/sh
+printf '%s\n' '{"content":"catalog-ok","tool_calls":[],"usage":{"prompt_tokens":1,"completion_tokens":1}}'
+EOF
+printf '0\n' > "$STUB_N"
+catwork=$d/catwork
+mkdir -p "$catwork"
+(
+  cd "$catwork"
+  SLAB_SKIP_INIT=1 SEED_LLM_STUB=$stub STUB_N=$STUB_N \
+    "$cwd/bin/agent" --oneshot 'hello'
+) > "$d/cat.out" 2> "$d/cat.err" || true
+catmsg=
+for m in "$catwork/.agent-runs"/*/messages.json; do
+  [ -f "$m" ] || continue
+  catmsg=$m
+done
+if [ -n "$catmsg" ] \
+  && grep -q 'available_skills' "$catmsg" \
+  && grep -q 'pdf-demo' "$catmsg" \
+  && grep -q 'Extract text from PDF' "$catmsg" \
+  && grep -q "The task is the human's last message" "$catmsg" \
+  && grep -q 'agentskills.io/specification' "$catmsg" \
+  && ! grep -q 'hidden-no' "$catmsg"; then
+  printf 'ok   oneshot system carries skill catalog\n'
+else
+  printf 'FAIL oneshot system carries skill catalog\n'; fail=$((fail + 1))
+fi
+
+# compact: high prompt_tokens + three tool rounds; first fat tool is pruned
+mkdir -p "$cwd/agent-store/plugins"
+if [ -f "$ROOT/plugins/agent/compact.sh" ]; then
+  cp "$ROOT/plugins/agent/compact.sh" "$cwd/agent-store/plugins/compact.sh"
+fi
+printf '%s\n' '{"version":"14","hooks":{"after_turn":["compact.sh"]},"context_window":128000}' \
+  > "$cwd/agent-store/catalog.json"
+cwork=$d/cwork
+mkdir -p "$cwork"
+awk 'BEGIN{for(i=0;i<300;i++)printf "X"}' > "$cwork/fat.txt"
+printf '\n' >> "$cwork/fat.txt"
+cat > "$stub" <<'EOF'
+#!/bin/sh
+msgs=
+while [ "$#" -gt 0 ]; do
+  case $1 in
+    --messages) msgs=$2; shift 2 ;;
+    *) shift ;;
+  esac
+done
+if [ -n "$msgs" ] && grep -q 'Active Task' "$msgs"; then
+  printf '%s\n' '{"content":"## Goal\nread fat\n## Active Task\ndone","tool_calls":[],"usage":{"prompt_tokens":10,"completion_tokens":8}}'
+  exit 0
+fi
+n=$(cat "${STUB_N}" 2>/dev/null || echo 0); n=$((n + 1)); printf '%s\n' "$n" > "${STUB_N}"
+case $n in
+  1) printf '%s\n' '{"content":"","tool_calls":[{"id":"c1","name":"shell","arguments":"{\"command\":\"cat fat.txt\"}"}],"usage":{"prompt_tokens":1000,"completion_tokens":1}}' ;;
+  2) printf '%s\n' '{"content":"","tool_calls":[{"id":"c2","name":"shell","arguments":"{\"command\":\"echo a\"}"}],"usage":{"prompt_tokens":2000,"completion_tokens":1}}' ;;
+  3) printf '%s\n' '{"content":"","tool_calls":[{"id":"c3","name":"shell","arguments":"{\"command\":\"echo b\"}"}],"usage":{"prompt_tokens":3000,"completion_tokens":1}}' ;;
+  *) printf '%s\n' '{"content":"compact-done","tool_calls":[],"usage":{"prompt_tokens":90000,"completion_tokens":1}}' ;;
+esac
+EOF
+chmod 755 "$stub"
+printf '0\n' > "$STUB_N"
+(
+  cd "$cwork"
+  SLAB_SKIP_INIT=1 SEED_LLM_STUB=$stub STUB_N=$STUB_N \
+    "$cwd/bin/agent" --oneshot 'read the fat file then continue'
+) > "$d/cmp.out" 2> "$d/cmp.err" || true
+cmpmsg=
+for m in "$cwork/.agent-runs"/*/messages.json; do
+  [ -f "$m" ] || continue
+  cmpmsg=$m
+done
+if [ -n "$cmpmsg" ] \
+  && ! grep -q 'XXXXXXXXXX' "$cmpmsg" \
+  && grep -qE 'old tool output cleared|CONTEXT COMPACTION|Active Task' "$cmpmsg"; then
+  printf 'ok   compact prunes old tool output\n'
+else
+  printf 'FAIL compact prunes old tool output\n'; fail=$((fail + 1))
+fi
+if grep -q 'compact:' "$d/cmp.err"; then
+  printf 'ok   compact prints machine line\n'
+else
+  printf 'FAIL compact prints machine line\n'; fail=$((fail + 1))
+fi
+# compact.sh: summary request keeps fat-tool head facts; messages still prune
+ccdir=$d/ccfacts
+mkdir -p "$ccdir/hooks"
+awk 'BEGIN{
+  printf "MARKER_ALPHA=ORANGE-MANGO-7\n"
+  for(i=0;i<400;i++) printf "lorem-payload-for-context-pressure %03d\n", i
+  printf "block alpha 1399 lorem-payload-for-context-pressure\n"
+}' > "$ccdir/fatbody.txt"
+jq -n --rawfile fat "$ccdir/fatbody.txt" '
+  [
+    {role:"system",content:"sys"},
+    {role:"user",content:"cat the files"},
+    {role:"assistant",content:"",tool_calls:[{id:"t1",function:{name:"shell",arguments:"{\"command\":\"cat alpha.txt\"}"}}]},
+    {role:"tool",content:$fat},
+    {role:"assistant",content:"",tool_calls:[{id:"t2",function:{name:"shell",arguments:"{\"command\":\"echo x\"}"}}]},
+    {role:"tool",content:"x"},
+    {role:"assistant",content:"",tool_calls:[{id:"t3",function:{name:"shell",arguments:"{\"command\":\"echo y\"}"}}]},
+    {role:"tool",content:"y"}
+  ]
+' > "$ccdir/messages.json"
+SLAB_MESSAGES=$ccdir/messages.json \
+SLAB_HOOK_WORK=$ccdir/hooks \
+SLAB_COMPACT_FORCE=1 \
+SLAB_CONTEXT_WINDOW=128000 \
+  /bin/sh "$ROOT/plugins/agent/compact.sh" > "$ccdir/out" 2> "$ccdir/err" || true
+if [ -f "$ccdir/hooks/complete-request.json" ] \
+  && jq -e '.user | test("ORANGE-MANGO-7")' "$ccdir/hooks/complete-request.json" >/dev/null 2>&1 \
+  && jq -e '.user | test("block alpha 1399")' "$ccdir/hooks/complete-request.json" >/dev/null 2>&1 \
+  && jq -e '.system | test("verbatim")' "$ccdir/hooks/complete-request.json" >/dev/null 2>&1 \
+  && grep -q 'old tool output cleared' "$ccdir/messages.json" \
+  && ! grep -q 'ORANGE-MANGO-7' "$ccdir/messages.json" \
+  && grep -q 'compact: pruned' "$ccdir/err"; then
+  printf 'ok   compact summary request keeps tool facts\n'
+else
+  printf 'FAIL compact summary request keeps tool facts\n'; fail=$((fail + 1))
+fi
+rm -rf "$cwd/agent-store"
 # detach: engine is bin/agent, sibling seed.sh can go
+cat > "$stub" <<'EOF'
+#!/bin/sh
+n=$(cat "${STUB_N}" 2>/dev/null || echo 0); n=$((n + 1)); printf '%s\n' "$n" > "${STUB_N}"
+if [ "$n" -eq 1 ]; then
+  printf '{"content":"","tool_calls":[{"id":"c1","name":"shell","arguments":"{\\"command\\":\\"pwd\\"}"}],"usage":{"prompt_tokens":4,"completion_tokens":2}}\n'
+else
+  printf '{"content":"done","tool_calls":[],"usage":{"prompt_tokens":5,"completion_tokens":1}}\n'
+fi
+EOF
 rm -f "$cwd/seed.sh"
 printf '0\n' > "$STUB_N"
 (
@@ -279,6 +656,47 @@ if grep -R '/box$' "$repl/.agent-runs" >/dev/null 2>&1; then
 else
   printf 'FAIL interactive shell persisted cd\n'; fail=$((fail + 1))
 fi
+linked=0
+for m in "$repl/.agent-runs"/*/messages.json; do
+  [ -f "$m" ] || continue
+  if grep -q 'make a box and enter it' "$m" && grep -q 'where am i' "$m"; then
+    linked=1
+  fi
+done
+if [ "$linked" -eq 1 ]; then
+  printf 'ok   interactive keeps prior user turns\n'
+else
+  printf 'FAIL interactive keeps prior user turns\n'; fail=$((fail + 1))
+fi
+if grep -R 'reasoning_content' "$repl/.agent-runs" >/dev/null 2>&1; then
+  printf 'FAIL interactive context drops thinking\n'; fail=$((fail + 1))
+else
+  printf 'ok   interactive context drops thinking\n'
+fi
+
+# outbound request must drop thinking even if a prior message stored it
+cat > "$d/think-msgs.json" <<'JSON'
+[{"role":"system","content":"s"},{"role":"assistant","content":"a","reasoning_content":"secret-think"},{"role":"user","content":"q"}]
+JSON
+seen=$d/seen-msgs.json
+cat > "$d/seen-stub" <<'EOF'
+#!/bin/sh
+while [ "$#" -gt 0 ]; do
+  case $1 in
+    --messages) cp "$2" "$SEEN_MSGS"; shift 2 ;;
+    *) shift ;;
+  esac
+done
+printf '%s\n' '{"content":"ok","tool_calls":[],"usage":{}}'
+EOF
+chmod +x "$d/seen-stub"
+SEEN_MSGS=$seen SEED_LLM_STUB=$d/seen-stub \
+  /bin/sh "$cwd/bin/agent" --llm --messages "$d/think-msgs.json" >/dev/null 2>&1 || true
+if [ -f "$seen" ] && ! grep -q 'secret-think' "$seen" && ! grep -q reasoning_content "$seen"; then
+  printf 'ok   outbound messages drop thinking\n'
+else
+  printf 'FAIL outbound messages drop thinking\n'; fail=$((fail + 1))
+fi
 
 # install is offline: no stub, no network
 cwd2=$d/cwd2
@@ -290,10 +708,121 @@ mkdir -p "$cwd2"
 ck "offline install wrote agent" test -x "$cwd2/bin/agent"
 if grep -q 'installed:' "$d/cap.err"; then printf 'ok   offline install verified\n'
 else printf 'FAIL offline install verified\n'; fail=$((fail + 1)); fi
+# resume must turn thinking off even if an old .env left it on
+awk '
+  BEGIN { done=0 }
+  /^LLM_EXTRA=/ {
+    print "LLM_EXTRA=\"{\\\"thinking\\\":{\\\"type\\\":\\\"enabled\\\"}}\""
+    done=1
+    next
+  }
+  { print }
+  END { if (!done) print "LLM_EXTRA=\"{\\\"thinking\\\":{\\\"type\\\":\\\"enabled\\\"}}\"" }
+' "$cwd2/.env" > "$cwd2/.env.n" && mv "$cwd2/.env.n" "$cwd2/.env"
+(
+  cd "$cwd2"
+  /bin/sh "$SEED"
+) > "$d/resume.out" 2> "$d/resume.err" || true
+if grep '^LLM_EXTRA=' "$cwd2/.env" | grep -q enabled; then
+  printf 'FAIL resume disables leftover thinking\n'; fail=$((fail + 1))
+else
+  printf 'ok   resume disables leftover thinking\n'
+fi
 if grep -q '\[seed\] tokens' "$d/cap.err" "$d/err"; then
   printf 'FAIL install has no token heartbeat\n'; fail=$((fail + 1))
 else
   printf 'ok   install has no token heartbeat\n'
+fi
+
+# fetch jq from a local URL; do not hit GitHub in the suite
+if command -v python3 >/dev/null 2>&1 && command -v curl >/dev/null 2>&1; then
+  jqdl=$d/jqdl
+  mkdir -p "$jqdl" "$d/jqbin"
+  cat > "$jqdl/jq-fake" <<'EOF'
+#!/bin/sh
+if [ "$1" = --version ]; then printf 'jq-fake\n'; exit 0; fi
+printf '{}\n'
+exit 0
+EOF
+  chmod +x "$jqdl/jq-fake"
+  JQPORT=$(python3 -c 'import socket;s=socket.socket();s.bind(("127.0.0.1",0));print(s.getsockname()[1]);s.close()')
+  python3 -m http.server "$JQPORT" --bind 127.0.0.1 --directory "$jqdl" >/dev/null 2>&1 &
+  JQ_PID=$!
+  i=0
+  while [ "$i" -lt 30 ]; do
+    curl -sS -o /dev/null "http://127.0.0.1:$JQPORT/jq-fake" 2>/dev/null && break
+    i=$((i + 1))
+    sleep 0.1
+  done
+  (
+    SEED_FORCE_JQ=1 SEED_JQ_DEST=$d/jqbin/jq \
+      SEED_JQ_URL=http://127.0.0.1:$JQPORT/jq-fake \
+      /bin/sh "$SEED" --ensure-jq
+  ) > "$d/jq.out" 2> "$d/jq.err" || true
+  kill "$JQ_PID" 2>/dev/null || true
+  if grep -q 'installing: jq' "$d/jq.err" && [ -x "$d/jqbin/jq" ] \
+    && PATH="$d/jqbin:$PATH" jq --version 2>/dev/null | grep -q jq-fake; then
+    printf 'ok   seed fetches jq when missing\n'
+  else
+    printf 'FAIL seed fetches jq when missing\n'; fail=$((fail + 1))
+  fi
+  # plugin root first, even if official would also work
+  jqmir=$d/jqmir
+  mkdir -p "$jqmir/jq" "$d/jqbin2" "$d/jqbin3"
+  cat > "$jqmir/jq/jq-fake" <<'EOF'
+#!/bin/sh
+if [ "$1" = --version ]; then printf 'jq-mirror\n'; exit 0; fi
+printf '{}\n'
+exit 0
+EOF
+  cat > "$jqmir/official" <<'EOF'
+#!/bin/sh
+if [ "$1" = --version ]; then printf 'jq-github\n'; exit 0; fi
+printf '{}\n'
+exit 0
+EOF
+  for n in jq-linux-amd64 jq-linux-arm64 jq-macos-amd64 jq-macos-arm64 jq-windows-amd64.exe; do
+    cp "$jqmir/jq/jq-fake" "$jqmir/jq/$n"
+    chmod +x "$jqmir/jq/$n"
+  done
+  chmod +x "$jqmir/official"
+  MPORT=$(python3 -c 'import socket;s=socket.socket();s.bind(("127.0.0.1",0));print(s.getsockname()[1]);s.close()')
+  python3 -m http.server "$MPORT" --bind 127.0.0.1 --directory "$jqmir" >/dev/null 2>&1 &
+  JQ_PID=$!
+  i=0
+  while [ "$i" -lt 30 ]; do
+    curl -sS -o /dev/null "http://127.0.0.1:$MPORT/jq/jq-linux-amd64" 2>/dev/null && break
+    i=$((i + 1))
+    sleep 0.1
+  done
+  rm -f "$d/jqbin2/jq"
+  (
+    SEED_FORCE_JQ=1 SEED_JQ_DEST=$d/jqbin2/jq \
+      SEED_JQ_OFFICIAL_URL=http://127.0.0.1:$MPORT/official \
+      SEED_PLUGIN_ROOT=http://127.0.0.1:$MPORT \
+      /bin/sh "$SEED" --ensure-jq
+  ) > "$d/jqm.out" 2> "$d/jqm.err" || true
+  if ! grep -q 'installing: jq (github)' "$d/jqm.err" && [ -x "$d/jqbin2/jq" ] \
+    && PATH="$d/jqbin2:$PATH" jq --version 2>/dev/null | grep -q jq-mirror; then
+    printf 'ok   seed prefers plugin root jq over github\n'
+  else
+    printf 'FAIL seed prefers plugin root jq over github\n'; fail=$((fail + 1))
+  fi
+  rm -f "$d/jqbin3/jq"
+  (
+    SEED_FORCE_JQ=1 SEED_JQ_DEST=$d/jqbin3/jq \
+      SEED_JQ_OFFICIAL_URL=http://127.0.0.1:$MPORT/official \
+      SEED_PLUGIN_ROOT=http://127.0.0.1:1 \
+      /bin/sh "$SEED" --ensure-jq
+  ) > "$d/jqg.out" 2> "$d/jqg.err" || true
+  kill "$JQ_PID" 2>/dev/null || true
+  JQ_PID=
+  if grep -q 'installing: jq (github)' "$d/jqg.err" && [ -x "$d/jqbin3/jq" ] \
+    && PATH="$d/jqbin3:$PATH" jq --version 2>/dev/null | grep -q jq-github; then
+    printf 'ok   seed fetches jq from github when mirror fails\n'
+  else
+    printf 'FAIL seed fetches jq from github when mirror fails\n'; fail=$((fail + 1))
+  fi
 fi
 
 # seed plugin: one catalog, then models plugin, one pick
@@ -357,12 +886,12 @@ if command -v python3 >/dev/null 2>&1 && command -v curl >/dev/null 2>&1; then
 #!/bin/sh
 jq '.ready=true
   | .updated="t"
-  | .system.tools.sh.present=true
-  | .system.tools.curl.present=true
-  | .system.tools.jq.present=true
-  | .system.tools.rg.present=true
-  | .system.tools.git.present=true
-  | .system.tools.python.present=true' \
+  | .system.tools.sh.present=true | .system.tools.sh.ok=true
+  | .system.tools.curl.present=true | .system.tools.curl.ok=true
+  | .system.tools.jq.present=true | .system.tools.jq.ok=true
+  | .system.tools.rg.present=true | .system.tools.rg.ok=true
+  | .system.tools.git.present=true | .system.tools.git.ok=true
+  | .system.tools.python.present=true | .system.tools.python.ok=true' \
   agent-store/index.json > agent-store/index.json.tmp
 mv agent-store/index.json.tmp agent-store/index.json
 SH
@@ -382,7 +911,8 @@ EOF
     SEED_PLUGIN_ROOT=$PROOT SEED_LLM_STUB=$stub STUB_N=$STUB_N \
       "$cwd/bin/agent" </dev/null
   ) > "$d/init.out" 2> "$d/init.err" || true
-  if grep -q 'initializing:' "$d/init.err" && grep -q '>' "$d/init.err"; then
+  if grep -q 'initializing:' "$d/init.err" && grep -q 'ready' "$d/init.err" \
+    && grep -q '>' "$d/init.err"; then
     printf 'ok   first open inits then prompts\n'
   else
     printf 'FAIL first open inits then prompts\n'; fail=$((fail + 1))
@@ -397,9 +927,84 @@ EOF
   else
     printf 'FAIL init wrote ready machine tree\n'; fail=$((fail + 1))
   fi
+  if jq -e '.system.retrieve | type=="string" and length>0' \
+    "$cwd/agent-store/index.json" >/dev/null 2>&1; then
+    printf 'ok   placed tree keeps retrieve\n'
+  else
+    printf 'FAIL placed tree keeps retrieve\n'; fail=$((fail + 1))
+  fi
+  if jq -e '.system.web.fetch.use' "$cwd/agent-store/index.json" >/dev/null 2>&1 \
+    && ! jq -e '.system.web | has("websearch")' "$cwd/agent-store/index.json" >/dev/null 2>&1; then
+    printf 'ok   placed tree keeps prompt fetch only\n'
+  else
+    printf 'FAIL placed tree keeps prompt fetch only\n'; fail=$((fail + 1))
+  fi
   ck "init cached catalog" test -f "$cwd/agent-store/catalog.json"
   ck "init cached init plugin" test -f "$cwd/agent-store/plugins/init.json"
+  ck "init cached host script" test -f "$cwd/agent-store/plugins/host.sh"
+  ck "init cached compact script" test -f "$cwd/agent-store/plugins/compact.sh"
   ck "init wrote memory tree" test -f "$cwd/.agent-memory/index.json"
+  if jq -e '.host | type=="object" and has("ok") and has("kind") and has("user")' \
+    "$cwd/agent-store/index.json" >/dev/null 2>&1; then
+    printf 'ok   init wrote host map\n'
+  else
+    printf 'FAIL init wrote host map\n'; fail=$((fail + 1))
+  fi
+
+  # fake HOME: host_inventory records one-level dirs and a git project
+  hdir=$d/hostinv
+  mkdir -p "$hdir/bin" \
+    "$hdir/home/Docs" "$hdir/home/.claude" "$hdir/home/.Trash" \
+    "$hdir/home/leehow/code/demo/.git"
+  cp "$cwd/.env" "$hdir/.env"
+  cp "$cwd/bin/agent" "$hdir/bin/agent"
+  chmod 755 "$hdir/bin/agent"
+  cat > "$hdir/fill-tree.sh" <<'SH'
+#!/bin/sh
+jq '.ready=true
+  | .updated="t"
+  | .system.tools.sh.present=true | .system.tools.sh.ok=true
+  | .system.tools.curl.present=true | .system.tools.curl.ok=true
+  | .system.tools.jq.present=true | .system.tools.jq.ok=true
+  | .system.tools.rg.present=true | .system.tools.rg.ok=true
+  | .system.tools.git.present=true | .system.tools.git.ok=true
+  | .system.tools.python.present=true | .system.tools.python.ok=true' \
+  agent-store/index.json > agent-store/index.json.tmp
+mv agent-store/index.json.tmp agent-store/index.json
+SH
+  chmod 755 "$hdir/fill-tree.sh"
+  cat > "$stub" <<'EOF'
+#!/bin/sh
+n=$(cat "${STUB_N}" 2>/dev/null || echo 0); n=$((n + 1)); printf '%s\n' "$n" > "${STUB_N}"
+if [ "$n" -eq 1 ]; then
+  printf '%s\n' '{"content":"","tool_calls":[{"id":"h1","name":"shell","arguments":"{\"command\":\"sh fill-tree.sh\"}"}],"usage":{"prompt_tokens":1,"completion_tokens":1}}'
+else
+  printf '%s\n' '{"content":"hostinited","tool_calls":[],"usage":{"prompt_tokens":1,"completion_tokens":1}}'
+fi
+EOF
+  printf '0\n' > "$STUB_N"
+  (
+    cd "$hdir"
+    HOME=$hdir/home SEED_PLUGIN_ROOT=$PROOT SEED_LLM_STUB=$stub STUB_N=$STUB_N \
+      "$hdir/bin/agent" </dev/null
+  ) > "$d/host.out" 2> "$d/host.err" || true
+  if jq -e --arg home "$hdir/home" \
+      '.host.ok==true
+       and .host.home==$home
+       and (.host.home_top|index("Docs"))
+       and (.host.home_top|index(".claude"))
+       and ((.host.home_top|index(".Trash"))|not)
+       and (.host.projects|map(.name)|index("demo"))' \
+    "$hdir/agent-store/index.json" >/dev/null 2>&1; then
+    printf 'ok   host inventory maps fake home\n'
+  else
+    printf 'FAIL host inventory maps fake home\n'; fail=$((fail + 1))
+  fi
+  if grep -q '>' "$d/host.err" && ! grep -q 'error: init failed' "$d/host.err"; then
+    printf 'ok   host inventory does not block ready\n'
+  else
+    printf 'FAIL host inventory does not block ready\n'; fail=$((fail + 1))
+  fi
 
   # already ready: dead plugin root still opens
   (
@@ -427,6 +1032,12 @@ EOF
       "$ROOT/plugins/agent/init.json" > "$up/agent/init.json"
   else
     printf '%s\n' '{"prompt":"updated-init-prompt","machine_tree":{},"memory_tree":{}}' > "$up/agent/init.json"
+  fi
+  if [ -f "$ROOT/plugins/agent/host.sh" ]; then
+    cp "$ROOT/plugins/agent/host.sh" "$up/agent/host.sh"
+  fi
+  if [ -f "$ROOT/plugins/agent/compact.sh" ]; then
+    cp "$ROOT/plugins/agent/compact.sh" "$up/agent/compact.sh"
   fi
   kill "$PLUGIN_PID" 2>/dev/null || true
   PLUGIN_PID=
@@ -466,6 +1077,98 @@ EOF
     printf 'ok   --update does not rescan\n'
   else
     printf 'FAIL --update does not rescan\n'; fail=$((fail + 1))
+  fi
+  jq '.system.web.junk={"ok":true}' "$cwd/agent-store/index.json" \
+    > "$cwd/agent-store/index.json.tmp"
+  mv "$cwd/agent-store/index.json.tmp" "$cwd/agent-store/index.json"
+  jq '.version="3" | .updated="2099-01-02T00:00:00Z"' \
+    "$up/agent/index.json" > "$up/agent/index.json.tmp"
+  mv "$up/agent/index.json.tmp" "$up/agent/index.json"
+  (
+    cd "$cwd"
+    SEED_PLUGIN_ROOT=$PROOT2 "$cwd/bin/agent" --update
+  ) > "$d/up2.out" 2> "$d/up2.err" || true
+  if jq -e '.system.web.fetch.use and (.system.web|has("junk")|not)' \
+    "$cwd/agent-store/index.json" >/dev/null 2>&1; then
+    printf 'ok   --update drops leftover web slots\n'
+  else
+    printf 'FAIL --update drops leftover web slots\n'; fail=$((fail + 1))
+  fi
+
+  # model wrote ready + skills at the top level, dropped version/ours:
+  # host must salvage, not print init failed
+  crook=$d/crook
+  mkdir -p "$crook/bin"
+  cp "$cwd/.env" "$crook/.env"
+  cp "$cwd/bin/agent" "$crook/bin/agent"
+  chmod 755 "$crook/bin/agent"
+  cat > "$crook/crook-tree.sh" <<'SH'
+#!/bin/sh
+jq '
+  .ready=true
+  | .updated="t"
+  | .system.tools.sh.present=true | .system.tools.sh.ok=true
+  | .system.tools.curl.present=true | .system.tools.curl.ok=true
+  | .system.tools.jq.present=true | .system.tools.jq.ok=true
+  | .system.tools.rg.present=true | .system.tools.rg.ok=true
+  | .system.tools.git.present=true | .system.tools.git.ok=true
+  | .system.tools.python.present=true | .system.tools.python.ok=true
+  | .skills=[{name:"pdf-demo",description:"Extract text from PDF files",path:"/tmp/pdf-demo",ok:true,note:""}]
+  | del(.version)
+  | del(.ours)
+  | del(.system.skills)
+' agent-store/index.json > agent-store/index.json.tmp
+mv agent-store/index.json.tmp agent-store/index.json
+SH
+  chmod 755 "$crook/crook-tree.sh"
+  cat > "$stub" <<'EOF'
+#!/bin/sh
+n=$(cat "${STUB_N}" 2>/dev/null || echo 0); n=$((n + 1)); printf '%s\n' "$n" > "${STUB_N}"
+if [ "$n" -eq 1 ]; then
+  printf '%s\n' '{"content":"","tool_calls":[{"id":"k1","name":"shell","arguments":"{\"command\":\"sh crook-tree.sh\"}"}],"usage":{"prompt_tokens":1,"completion_tokens":1}}'
+else
+  printf '%s\n' '{"content":"crooked","tool_calls":[],"usage":{"prompt_tokens":1,"completion_tokens":1}}'
+fi
+EOF
+  printf '0\n' > "$STUB_N"
+  (
+    cd "$crook"
+    SEED_PLUGIN_ROOT=$PROOT2 SEED_LLM_STUB=$stub STUB_N=$STUB_N \
+      "$crook/bin/agent" </dev/null
+  ) > "$d/crook.out" 2> "$d/crook.err" || true
+  if grep -q '>' "$d/crook.err" && ! grep -q 'error: init failed' "$d/crook.err"; then
+    printf 'ok   crooked ready tree still inits\n'
+  else
+    printf 'FAIL crooked ready tree still inits\n'; fail=$((fail + 1))
+  fi
+  if jq -e '.ready==true and has("version") and has("ours")
+      and (.system.skills|type=="array")
+      and (.system.skills|map(.name)|index("pdf-demo"))' \
+    "$crook/agent-store/index.json" >/dev/null 2>&1; then
+    printf 'ok   host salvages top-level skills\n'
+  else
+    printf 'FAIL host salvages top-level skills\n'; fail=$((fail + 1))
+  fi
+
+  # already-ready but crooked: repair on open, do not re-init
+  jq '
+    .skills=[{name:"keep-me",description:"x",path:"/tmp/k",ok:true,note:""}]
+    | del(.version)
+    | del(.ours)
+    | del(.system.skills)
+  ' "$crook/agent-store/index.json" > "$crook/agent-store/index.json.tmp"
+  mv "$crook/agent-store/index.json.tmp" "$crook/agent-store/index.json"
+  (
+    cd "$crook"
+    SEED_PLUGIN_ROOT=http://127.0.0.1:1 "$crook/bin/agent" </dev/null
+  ) > "$d/crook2.out" 2> "$d/crook2.err" || true
+  if grep -q '>' "$d/crook2.err" && ! grep -q 'initializing:' "$d/crook2.err" \
+    && ! grep -q 'error: init failed' "$d/crook2.err" \
+    && jq -e '.system.skills[0].name=="keep-me" and has("ours")' \
+      "$crook/agent-store/index.json" >/dev/null 2>&1; then
+    printf 'ok   ready crooked tree repaired offline\n'
+  else
+    printf 'FAIL ready crooked tree repaired offline\n'; fail=$((fail + 1))
   fi
 
   # bad stub deletes a required branch -> init failed

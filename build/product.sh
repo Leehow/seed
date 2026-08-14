@@ -5,11 +5,41 @@ product_root() {
   esac
 }
 
+skill_catalog() {
+  scf=$INSTALL/agent-store/index.json
+  [ -f "$scf" ] || return 0
+  jq -r '
+    def esc: gsub("&";"&amp;") | gsub("<";"&lt;") | gsub(">";"&gt;");
+    (.system.skills // [])
+    | map(select(.ok == true and ((.name // "") | length) > 0))
+    | if length == 0 then empty
+      else
+        (["",
+          "The following skills provide specialized instructions for specific tasks.",
+          "Load a skill file with shell (cat that path) when the task matches its description.",
+          "<available_skills>"]
+        + [ .[] |
+            "  <skill>",
+            "    <name>" + (.name | esc) + "</name>",
+            "    <description>" + ((.description // "" | gsub("\n";" ") | esc)) + "</description>",
+            "    <location>" + ((.path // "") | esc) + "</location>",
+            "  </skill>"
+          ]
+        + ["</available_skills>"])
+        | join("\n")
+      end
+  ' "$scf" 2>/dev/null || true
+}
+
 product_system() {
-  printf '%s\nMachine index: %s\nProject memory: %s\n' \
+  printf '%s\nModel: %s (%s)\nMachine index: %s\nProject memory: %s\n' \
     "$(cabin_product_system)" \
+    "${LLM_MODEL:-unknown}" \
+    "${LLM_PROVIDER:-unknown}" \
     "$INSTALL/agent-store/index.json" \
     "$PWD/.agent-memory/index.json"
+  skill_catalog
+  agent_run_hooks system
 }
 
 agent_plugin_get() {
@@ -27,10 +57,181 @@ agent_plugin_get() {
   esac
 }
 
+# Best-effort GET into dest. 404 / network fail: leave dest, return 1.
+agent_plugin_try() {
+  url=$1
+  dest=$2
+  need curl
+  body=$(mktemp "${TMPDIR:-/tmp}/seed-aptry.XXXXXX")
+  set +e
+  code=$(curl -q -sS --connect-timeout 5 --max-time 30 -o "$body" -w '%{http_code}' "$url")
+  cs=$?
+  set -e
+  if [ "$cs" -eq 0 ]; then
+    case $code in
+      2*) mv "$body" "$dest"; return 0 ;;
+    esac
+  fi
+  rm -f "$body"
+  return 1
+}
+
+agent_fetch_hooks() {
+  store=$INSTALL/agent-store
+  catf=$store/catalog.json
+  [ -f "$catf" ] || return 0
+  mkdir -p "$store/plugins"
+  root=$(plugin_root)
+  jq -r '.hooks | .. | strings' "$catf" 2>/dev/null | sort -u | while IFS= read -r rel; do
+    [ -n "$rel" ] || continue
+    case $rel in
+      *.sh) ;;
+      *) continue ;;
+    esac
+    case $rel in
+      *..*|/*) continue ;;
+    esac
+    dest=$store/plugins/$(basename "$rel")
+    agent_plugin_try "$(plugin_join "$root/agent" "$rel")" "$dest" || true
+  done
+}
+
+agent_run_hooks() {
+  phase=$1
+  store=$INSTALL/agent-store
+  catf=$store/catalog.json
+  [ -f "$catf" ] || return 0
+  SLAB_MACHINE_INDEX=$store/index.json
+  export SLAB_MACHINE_INDEX
+  jq -r --arg p "$phase" '.hooks[$p][]? // empty' "$catf" 2>/dev/null | while IFS= read -r rel; do
+    [ -n "$rel" ] || continue
+    script=$store/plugins/$(basename "$rel")
+    [ -f "$script" ] || continue
+    case $phase in
+      system) /bin/sh "$script" blurb || true ;;
+      *) /bin/sh "$script" || true ;;
+    esac
+  done
+}
+
+agent_after_turn() {
+  at_msgs=$1
+  at_tok=$2
+  at_ev=$3
+  [ "${INIT_STOP_WHEN_READY:-}" = 1 ] && return 0
+  [ -n "${INSTALL:-}" ] || return 0
+  [ -f "$at_msgs" ] || return 0
+  store=$INSTALL/agent-store
+  catf=$store/catalog.json
+  [ -f "$catf" ] || return 0
+  jq -e '.hooks.after_turn | type=="array" and length>0' "$catf" >/dev/null 2>&1 || return 0
+  at_work=${at_ev:-$store}/hooks
+  mkdir -p "$at_work" "$store"
+  at_cw=$(jq -r '.context_window // empty' "$catf" 2>/dev/null || true)
+  [ -n "$at_cw" ] || at_cw=${SLAB_CONTEXT_WINDOW:-${LLM_CONTEXT_WINDOW:-128000}}
+  SLAB_MESSAGES=$at_msgs
+  SLAB_PROMPT_TOKENS=$at_tok
+  SLAB_CONTEXT_WINDOW=$at_cw
+  SLAB_HOOK_WORK=$at_work
+  export SLAB_MESSAGES SLAB_PROMPT_TOKENS SLAB_CONTEXT_WINDOW SLAB_HOOK_WORK
+  SLAB_COMPLETE_RESULT=
+  export SLAB_COMPLETE_RESULT
+  rm -f "$at_work/complete-request.json"
+  agent_run_hooks after_turn
+  at_req=$at_work/complete-request.json
+  [ -f "$at_req" ] || return 0
+  at_sys=$(jq -r '.system // empty' "$at_req")
+  at_user=$(jq -r '.user // empty' "$at_req")
+  rm -f "$at_req"
+  [ -n "$at_sys" ] && [ -n "$at_user" ] || return 0
+  at_in=$(mktemp "${TMPDIR:-/tmp}/seed-ccin.XXXXXX")
+  at_out=$(mktemp "${TMPDIR:-/tmp}/seed-ccout.XXXXXX")
+  jq -n --arg s "$at_sys" --arg u "$at_user" \
+    '[{role:"system",content:$s},{role:"user",content:$u}]' > "$at_in"
+  set +e
+  model_complete_text "$at_in" "$at_out"
+  at_es=$?
+  set -e
+  rm -f "$at_in"
+  if [ "$at_es" -ne 0 ] || [ ! -s "$at_out" ]; then
+    rm -f "$at_out"
+    at_n=0
+    [ -f "$at_work/compact-fails" ] && at_n=$(cat "$at_work/compact-fails")
+    case $at_n in
+      ''|*[!0-9]*) at_n=0 ;;
+    esac
+    printf '%s\n' $((at_n + 1)) > "$at_work/compact-fails"
+    return 0
+  fi
+  jq -r '.content // empty' "$at_out" > "$at_work/complete-result.txt"
+  rm -f "$at_out"
+  if [ ! -s "$at_work/complete-result.txt" ]; then
+    at_n=0
+    [ -f "$at_work/compact-fails" ] && at_n=$(cat "$at_work/compact-fails")
+    case $at_n in
+      ''|*[!0-9]*) at_n=0 ;;
+    esac
+    printf '%s\n' $((at_n + 1)) > "$at_work/compact-fails"
+    return 0
+  fi
+  rm -f "$at_work/compact-fails"
+  SLAB_COMPLETE_RESULT=$at_work/complete-result.txt
+  export SLAB_COMPLETE_RESULT
+  agent_run_hooks after_turn
+  SLAB_COMPLETE_RESULT=
+  export SLAB_COMPLETE_RESULT
+}
+
 agent_ready() {
   f=$INSTALL/agent-store/index.json
   [ -f "$f" ] || return 1
   jq -e '.ready == true' "$f" >/dev/null 2>&1
+}
+
+# Model often writes a useful tree with the wrong shape (skills at the
+# top level, missing version/ours). Salvage contract branches; do not
+# invent a system object if the model deleted it.
+agent_repair_machine_tree() {
+  f=$INSTALL/agent-store/index.json
+  pack=$INSTALL/agent-store/plugins/init.json
+  [ -f "$f" ] || return 1
+  [ -f "$pack" ] || return 1
+  tmp=$(mktemp "${TMPDIR:-/tmp}/seed-repair.XXXXXX")
+  if jq --slurpfile pack "$pack" '
+    ($pack[0].machine_tree) as $tpl
+    | if (has("system") | not) or (.system | type != "object") then .
+      else
+        if (has("ready") | not) and (.system.ready == true) then .ready = true else . end
+        | if (has("version") | not) or (.version == null) or (.version == "") then
+            .version = $tpl.version
+          else . end
+        | if (has("ours") | not) then .ours = $tpl.ours else . end
+        | if (.system | has("retrieve") | not)
+            or (.system.retrieve | type != "string")
+            or ((.system.retrieve | length) == 0) then
+            .system.retrieve = $tpl.system.retrieve
+          else . end
+        | if (.system | has("other") | not) then .system.other = $tpl.system.other else . end
+        | if (.system | has("tools") | not) or (.system.tools | type != "object") then
+            .system.tools = $tpl.system.tools
+          else
+            .system.tools = ($tpl.system.tools * .system.tools)
+          end
+        | if (.system | has("skills") | not) then
+            if (.skills | type == "array") then .system.skills = .skills
+            else .system.skills = $tpl.system.skills
+            end
+          else . end
+        | if (.system | has("web") | not) and ($tpl.system | has("web")) then
+            .system["web"] = $tpl.system["web"]
+          else . end
+      end
+  ' "$f" > "$tmp"; then
+    mv "$tmp" "$f"
+    return 0
+  fi
+  rm -f "$tmp"
+  return 1
 }
 
 agent_check_machine_tree() {
@@ -42,9 +243,12 @@ agent_check_machine_tree() {
     and has("version")
     and has("system")
     and has("ours")
-    and (.system | has("tools") and has("skills") and has("other"))
+    and (.system | has("tools") and has("skills") and has("other") and has("retrieve"))
+    and (.system.retrieve | type=="string" and length>0)
     and (.system.tools | has("sh") and has("curl") and has("jq")
          and has("rg") and has("git") and has("python"))
+    and (.system.tools | to_entries
+         | all(.value | has("ok") and has("present") and has("path")))
   ' "$f" >/dev/null 2>&1
 }
 
@@ -52,6 +256,7 @@ agent_fetch_required() {
   store=$INSTALL/agent-store
   mkdir -p "$store/plugins"
   if [ -f "$store/catalog.json" ] && [ -f "$store/plugins/init.json" ]; then
+    agent_fetch_hooks
     return 0
   fi
   root=$(plugin_root)
@@ -68,6 +273,7 @@ agent_fetch_required() {
   printf '%s\n' "$index" > "$tmp"
   printf '%s\n' "$body" > "$store/plugins/init.json"
   mv "$tmp" "$store/catalog.json"
+  agent_fetch_hooks
 }
 
 agent_place_trees() {
@@ -97,21 +303,36 @@ agent_run_init() {
   mkdir -p "$ev"
   shell_init "$sess" "$PWD"
   set +e
+  INIT_STOP_WHEN_READY=1
+  export INIT_STOP_WHEN_READY
   run_loop "$(product_system)" "$prompt" "$sess" "$ev" "$AGENT_MAX_ROUNDS" 0
   as=$?
+  unset INIT_STOP_WHEN_READY
   set -e
   shell_stop "$sess" 2>/dev/null || :
-  [ "$as" -eq 0 ] || die "init failed" 76
+  agent_repair_machine_tree || true
+  agent_check_machine_tree && return 0
+  die "init failed" 76
 }
 
 agent_ensure_init() {
   [ "${SLAB_SKIP_INIT:-}" = 1 ] && return 0
-  agent_ready && return 0
+  agent_repair_machine_tree || true
+  if agent_check_machine_tree; then
+    agent_run_hooks after_ready
+    return 0
+  fi
   printf 'initializing:\n' >&2
   agent_fetch_required
   agent_place_trees
+  SEED_STREAM=1
+  SEED_STREAM_PRINT=1
+  export SEED_STREAM SEED_STREAM_PRINT
   agent_run_init
+  agent_repair_machine_tree || true
+  agent_run_hooks after_ready
   agent_check_machine_tree || die "init failed" 76
+  printf 'ready\n' >&2
 }
 
 agent_update() {
@@ -142,4 +363,16 @@ agent_update() {
   printf '%s\n' "$body" > "$tmpi"
   mv "$tmpi" "$store/plugins/init.json"
   mv "$tmpc" "$store/catalog.json"
+  agent_fetch_hooks
+  if [ -f "$store/index.json" ]; then
+    nr=$(jq -r '.machine_tree.system.retrieve // empty' "$store/plugins/init.json")
+    if [ -n "$nr" ]; then
+      tmpi2=$(mktemp "${TMPDIR:-/tmp}/seed-uret.XXXXXX")
+      jq --arg r "$nr" '
+        .system.retrieve=$r
+        | if .system["web"] then .system["web"] |= with_entries(select(.key == "fetch")) else . end
+      ' "$store/index.json" > "$tmpi2"
+      mv "$tmpi2" "$store/index.json"
+    fi
+  fi
 }

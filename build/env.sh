@@ -11,12 +11,111 @@ usage() {
   printf 'usage: sh seed.sh deepseek <API_KEY>\n' >&2
 }
 
-need() { command -v "$1" >/dev/null 2>&1 || die "need $1" 69; }
+need() {
+  command -v "$1" >/dev/null 2>&1 && return 0
+  if [ "$1" = jq ]; then
+    ensure_jq
+    command -v jq >/dev/null 2>&1 && return 0
+  fi
+  die "need $1" 69
+}
+
+jq_asset_name() {
+  os=$(uname -s | tr 'ABCDEFGHIJKLMNOPQRSTUVWXYZ' 'abcdefghijklmnopqrstuvwxyz')
+  arch=$(uname -m)
+  case $arch in
+    x86_64|amd64) arch=amd64 ;;
+    aarch64|arm64) arch=arm64 ;;
+    *) return 1 ;;
+  esac
+  case $os in
+    linux) printf 'jq-linux-%s\n' "$arch" ;;
+    darwin) printf 'jq-macos-%s\n' "$arch" ;;
+    mingw*|msys*|cygwin*) printf 'jq-windows-amd64.exe\n' ;;
+    *) return 1 ;;
+  esac
+}
+
+jq_official_url() {
+  ver=${SEED_JQ_VER:-1.7.1}
+  asset=$(jq_asset_name) || return 1
+  printf 'https://github.com/jqlang/jq/releases/download/jq-%s/%s\n' "$ver" "$asset"
+}
+
+jq_mirror_url() {
+  asset=$(jq_asset_name) || return 1
+  plugin_join "$(plugin_root)" "jq/$asset"
+}
+
+jq_fetch() {
+  url=$1
+  dest=$2
+  tmp=$dest.tmp
+  set +e
+  curl -q -fL --connect-timeout 15 --max-time 60 -o "$tmp" "$url"
+  cs=$?
+  set -e
+  if [ "$cs" -eq 0 ] && [ -s "$tmp" ]; then
+    chmod 755 "$tmp"
+    mv "$tmp" "$dest"
+    return 0
+  fi
+  rm -f "$tmp"
+  return 1
+}
+
+ensure_jq() {
+  if [ "${SEED_FORCE_JQ:-}" != 1 ] && command -v jq >/dev/null 2>&1; then
+    return 0
+  fi
+  dest=${SEED_JQ_DEST:-}
+  if [ -z "$dest" ]; then
+    root=${INSTALL:-$LAUNCH_CWD}
+    [ -n "$root" ] || root=$PWD
+    mkdir -p "$root/bin"
+    dest=$root/bin/jq
+    case $(uname -s) in
+      MINGW*|MSYS*|CYGWIN*) dest=$root/bin/jq.exe ;;
+    esac
+  fi
+  if [ "${SEED_FORCE_JQ:-}" != 1 ] && [ -x "$dest" ]; then
+    PATH=$(CDPATH= cd "$(dirname "$dest")" && pwd):$PATH
+    export PATH
+    return 0
+  fi
+  command -v curl >/dev/null 2>&1 || die "need curl" 69
+  mkdir -p "$(dirname "$dest")"
+  if [ -n "${SEED_JQ_URL:-}" ]; then
+    printf 'installing: jq\n' >&2
+    jq_fetch "$SEED_JQ_URL" "$dest" || die "need jq (download failed)" 69
+  else
+    official=${SEED_JQ_OFFICIAL_URL:-}
+    [ -n "$official" ] || official=$(jq_official_url) || official=
+    mirror=$(jq_mirror_url) || mirror=
+    printf 'installing: jq\n' >&2
+    if [ -n "$mirror" ] && jq_fetch "$mirror" "$dest"; then
+      :
+    else
+      [ -n "$official" ] || die "need jq (unsupported platform)" 69
+      printf 'installing: jq (github)\n' >&2
+      jq_fetch "$official" "$dest" || die "need jq (download failed)" 69
+    fi
+  fi
+  PATH=$(CDPATH= cd "$(dirname "$dest")" && pwd):$PATH
+  export PATH
+  command -v jq >/dev/null 2>&1 || die "need jq" 69
+}
+
+disable_thinking() {
+  extra=${LLM_EXTRA:-'{}'}
+  LLM_EXTRA=$(printf '%s' "$extra" | jq -c '. + {"thinking":{"type":"disabled"}}')
+}
 
 write_env_file() {
   dest=$1
   umask 077
-  extra=${LLM_EXTRA:-'{}'}
+  disable_thinking
+  extra=$LLM_EXTRA
   printf 'LLM_PROVIDER=%s\nLLM_API_URL=%s\nLLM_MODEL=%s\nLLM_API_KEY=%s\nLLM_EXTRA=%s\n' \
     "$LLM_PROVIDER" "$LLM_API_URL" "$LLM_MODEL" "$LLM_API_KEY" \
     "$(printf '%s' "$extra" | jq -Rs .)" > "$dest"
@@ -40,6 +139,8 @@ ensure_gitignore() {
   else
     printf '.env\n' > "$g"
   fi
+  grep -qxF 'bin/jq' "$g" || printf 'bin/jq\n' >> "$g"
+  grep -qxF 'bin/jq.exe' "$g" || printf 'bin/jq.exe\n' >> "$g"
 }
 
 plugin_root() {
@@ -136,7 +237,7 @@ resolve_provider() {
     deepseek)
       LLM_API_URL=${LLM_API_URL:-https://api.deepseek.com/chat/completions}
       LLM_MODEL=${LLM_MODEL:-deepseek-v4-flash}
-      LLM_EXTRA=${LLM_EXTRA:-'{"thinking":{"type":"enabled"}}'}
+      LLM_EXTRA='{"thinking":{"type":"disabled"}}'
       LLM_PROVIDER=deepseek ;;
     http*://*)
       LLM_API_URL=$1
