@@ -14,7 +14,7 @@
 
 | | 种子 `seed.sh` | 产物 `bin/agent` |
 |---|---|---|
-| 对人 | 无交互。终端只刷累计 token | `sh bin/agent` 进窗口；先几句引导，之后只显示用户输入和最后回答 |
+| 对人 | 无交互。不叫模型。最多 `installed:` | `sh bin/agent` 进窗口；只有 `>`、用户输入和最后回答 |
 | 对模型 | 要。CLI 与现在相同 | 要。读已存的凭据 |
 | 工具 | 持久 shell + edit | 同一对 |
 | 协议 | API `tool_calls` | 同一套 |
@@ -40,12 +40,12 @@ seed.sh
 与现在相同：
 
 ```text
-sh seed.sh <渠道> <API_KEY> [安装目录]
+sh seed.sh deepseek <API_KEY>
 ```
 
 - 渠道：`deepseek` | 完整 URL
-- 默认安装目录：当前目录（相对**调用 seed 时的当前目录**），产物是 `bin/agent`
-- 续跑：`sh seed.sh [安装目录]`，凭据从 `.env` 读，不再要求把 key 写在命令行
+- 安装目录：永远是调用时的当前目录。没有第三参数。多传路径 exit 64
+- 续跑：`sh seed.sh`，凭据从当前目录 `.env` 读。不写进 usage
 
 缺 curl / jq：exit 69。参数不对：exit 64。
 
@@ -98,24 +98,22 @@ LLM_API_KEY=sk-...
 
 对种子和产物都成立：
 
-1. messages 以 SYSTEM 开头，再加当前 TASK / 用户这句话
-2. 请求带 `tools`：shell、edit；`stream` 开着，只为拿 usage
+1. messages 以 SYSTEM 开头，再加当前用户这句话
+2. 请求带 `tools`：shell、edit；`stream:false`，一次完整 JSON
 3. 若有 `tool_calls`：按顺序执行，把每项结果以 tool 角色喂回，继续
-4. 若没有 tool_calls、只有一段文本：这一轮对**产物**来说就是「最后回答」，印给用户；对**种子**来说不当作装好，必须走第 8 节验收
-5. 轮数上限：种子默认 40，产物每条任务默认 20，均可环境变量覆盖
-6. 超限：种子 exit 75；产物向用户说任务没做完，不崩掉整个窗口
+4. 若没有 tool_calls、只有一段文本：这一轮就是「最后回答」，印给用户
+5. 轮数上限：产物每条任务默认 20，可环境变量覆盖
+6. 超限：产物印英文 `round limit reached; task unfinished`，不崩掉整个窗口
 
-SSE：不把 content / reasoning 打到终端。解析完整 JSON（或先把 SSE 收成一条消息）。终端最多一行心跳：累计 prompt tokens、completion tokens。证据里保存 usage。
+安装不跑 LOOP。不把 content / reasoning 打到终端。没有 token 心跳。证据里保存 usage。
 
 ## 8. 提示词
 
-对人：中文。对模型：英文。
+对模型：英文。种子不对人说话（stderr 用英文状态/错误）。产物打开就是 `>`，最后回答给人看。没有开场白。
 
-**种子 SYSTEM**：你是安装器，不是聊天窗口。只能 tool_calls 调持久 shell 和 edit。按当前机器特化这两个工具，写出交互版 `bin/agent`（同一对工具、同一个 loop）。产物工作区必须是「调用时的当前目录」，禁止写死路径。不要口头宣称装好。
+安装不叫模型：写 `.env`、写 shim、磁盘验收。
 
-**种子 TASK**：安装到 `$INSTALL`。带上本机探测结果（os、shell 路径、jq）。
-
-**产物打开时的引导（中文，短）**：能在当前目录改文件、跑命令；建议先看再改、改完自己检查。然后 `>` 等输入。空行或 Ctrl-D 退出。
+**产物打开**：只印 `>`。空行或 Ctrl-D 退出。没有开场白。
 
 **产物 SYSTEM**：你是 coding agent。只有 shell 和 edit。shell 跨轮持久。工作区是启动时的当前目录。过程不要往终端倒；最后用一段话回答用户。
 
@@ -127,12 +125,12 @@ SSE：不把 content / reasoning 打到终端。解析完整 JSON（或先把 SS
 
 ## 10. 装完验收（种子自己看，不信模型）
 
-LOOP 停后必须同时满足，否则 exit 76，并写明缺哪一项：
+写完 shim 后必须同时满足，否则 exit 76，并写明缺哪一项：
 
 1. `$INSTALL/bin/agent`、`llm`、持久 shell、`edit` 存在，且用本机 shell 语法检查通过
 2. 调用 seed 的当前目录有 `.env`（600），`$INSTALL/.env` 也有；字段能读出 key（验收时只检查「非空且文件权限」，不把 key 印出来）
 3. 种子用**假的**一轮 tool_calls（不联网）驱动产物：必须在 `$INSTALL` **之外**的临时目录里启动 agent；能接到 shell 或 edit；工作区是那个临时目录；源码里没有写死的本机绝对路径（运行时探测到的 `$INSTALL` 除外）
-4. `sh bin/agent` 无参数能打出中文引导；stdin 给 EOF 后干净退出
+4. `sh bin/agent` 无参数只有 `>`，没有开场白；stdin 给 EOF 后干净退出
 
 不在安装结束时跑真模型黑盒任务。真模型留给用户之后在自己的项目目录里用。
 
@@ -172,6 +170,6 @@ $INSTALL/
 
 ## 14. 成功标准
 
-- `sh seed.sh deepseek <key>` 能在无对话的情况下装完，终端主要是 token 心跳
-- 之后在任意项目目录 `sh $INSTALL/bin/agent` 进入交互窗口，引导短、过程不刷屏、能靠 shell + edit 改当前目录里的文件
+- `sh seed.sh deepseek <key>` 能在不叫模型的情况下装完，终端最多一行 `installed:`
+- 之后在任意项目目录 `sh bin/agent` 进入交互窗口，没有开场白、过程不刷屏、能靠 shell + edit 改当前目录里的文件
 - 换到另一台 Linux 机再跑同一颗种子，特化出的是那台的 shell，产物不携带本机绝对路径

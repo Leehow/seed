@@ -13,38 +13,72 @@ ck() {
 d=$(mktemp -d "${TMPDIR:-/tmp}/seed-pkg.XXXXXX")
 trap 'rm -rf "$d"' EXIT
 
+BUILD=$ROOT/build
+ck "build/pack.sh exists" test -f "$BUILD/pack.sh"
+for f in \
+  loop.sh model.sh edit.sh shell.sh env.sh install.sh agent.sh \
+  prompts/product-system.txt prompts/tools.json
+do
+  ck "build/$f" test -f "$BUILD/$f"
+done
+ck "no installer prompt" test ! -f "$BUILD/prompts/installer-system.txt"
+ck "no installer task" test ! -f "$BUILD/prompts/installer-task.txt"
+if [ -f "$BUILD/pack.sh" ]; then
+  /bin/sh "$BUILD/pack.sh" "$d/packed.sh"
+  ck "pack syntax" /bin/sh -n "$d/packed.sh"
+  if grep -n '^\. \|^source ' "$d/packed.sh" >/dev/null; then
+    printf 'FAIL packed seed is standalone\n'; fail=$((fail + 1))
+  else
+    printf 'ok   packed seed is standalone\n'
+  fi
+  if cmp -s "$d/packed.sh" "$SEED"; then
+    printf 'ok   seed.sh matches pack\n'
+  else
+    printf 'FAIL seed.sh matches pack (run: sh build/pack.sh)\n'; fail=$((fail + 1))
+  fi
+fi
+
 if grep -n 'python3\|#!/usr/bin/env python\|openai\|gpt-5\|/Users/\|pgrep \|head -c' "$SEED" >/dev/null; then
   printf 'FAIL seed.sh still has python/openai/host-path/nonportable bits\n'; fail=$((fail + 1))
 else
   printf 'ok   seed.sh is portable shell+jq\n'
 fi
 
-# SSE assembler must read a file (heredoc must not steal the stream)
-cat > "$d/sse.txt" <<'SSE'
-data: {"choices":[{"delta":{"content":"po"}}],"usage":null}
+help=$(/bin/sh "$SEED" --help 2>&1 || true)
+if printf '%s' "$help" | grep -q 'sh seed.sh deepseek <API_KEY>' \
+  && ! printf '%s' "$help" | grep -q 'install-dir' \
+  && ! printf '%s' "$help" | grep -q 'selftest'; then
+  printf 'ok   usage is one line\n'
+else
+  printf 'FAIL usage is one line\n'; fail=$((fail + 1))
+fi
+if grep -q 'cabin_banner' "$SEED" || grep -q '能在当前目录' "$SEED"; then
+  printf 'FAIL seed has no product lecture\n'; fail=$((fail + 1))
+else
+  printf 'ok   seed has no product lecture\n'
+fi
+if LC_ALL=C grep -n '[^	 -~]' "$SEED" >/dev/null; then
+  printf 'FAIL seed.sh is ASCII-only\n'; fail=$((fail + 1))
+else
+  printf 'ok   seed.sh is ASCII-only\n'
+fi
+if grep -n 'assemble_stream\|stream:true\|--assemble\|cabin_system' "$SEED" >/dev/null; then
+  printf 'FAIL seed has no SSE or install-model loop\n'; fail=$((fail + 1))
+else
+  printf 'ok   seed has no SSE or install-model loop\n'
+fi
 
-data: {"choices":[{"delta":{"content":"ng"}}],"usage":{"prompt_tokens":9,"completion_tokens":2}}
-
-data: [DONE]
-SSE
-assembled=$(/bin/sh "$SEED" --assemble "$d/sse.txt")
-if printf '%s' "$assembled" | grep -q '"content": "pong"'; then printf 'ok   assemble reads SSE file\n'
-else printf 'FAIL assemble reads SSE file\n'; fail=$((fail + 1)); fi
-if printf '%s' "$assembled" | grep -q '"prompt_tokens": 9'; then printf 'ok   assemble keeps usage\n'
-else printf 'FAIL assemble keeps usage\n'; fail=$((fail + 1)); fi
-
-cat > "$d/sse-tools.txt" <<'SSE'
-data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"c1","function":{"name":"sh","arguments":""}}]}}]}
-
-data: {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"{\"command\":\"pwd\"}"}}]}}],"usage":{"prompt_tokens":4,"completion_tokens":2}}
-
-data: [DONE]
-SSE
-assembled=$(/bin/sh "$SEED" --assemble "$d/sse-tools.txt")
-if printf '%s' "$assembled" | grep -q '"name": "sh"'; then printf 'ok   assemble merges tool_calls\n'
-else printf 'FAIL assemble merges tool_calls\n'; fail=$((fail + 1)); fi
-if printf '%s' "$assembled" | grep -q 'pwd'; then printf 'ok   assemble keeps tool arguments\n'
-else printf 'FAIL assemble keeps tool arguments\n'; fail=$((fail + 1)); fi
+# one-shot API JSON -> internal turn (no SSE)
+cat > "$d/api.json" <<'JSON'
+{"choices":[{"message":{"content":"","tool_calls":[{"id":"c1","type":"function","function":{"name":"shell","arguments":"{\"command\":\"pwd\"}"}}]}}],"usage":{"prompt_tokens":4,"completion_tokens":2}}
+JSON
+parsed=$(/bin/sh "$SEED" --parse-turn "$d/api.json")
+if printf '%s' "$parsed" | grep -q '"name": "shell"'; then printf 'ok   parse-turn reads tool name\n'
+else printf 'FAIL parse-turn reads tool name\n'; fail=$((fail + 1)); fi
+if printf '%s' "$parsed" | grep -q 'pwd'; then printf 'ok   parse-turn keeps arguments\n'
+else printf 'FAIL parse-turn keeps arguments\n'; fail=$((fail + 1)); fi
+if printf '%s' "$parsed" | grep -q '"prompt_tokens": 4'; then printf 'ok   parse-turn keeps usage\n'
+else printf 'FAIL parse-turn keeps usage\n'; fail=$((fail + 1)); fi
 
 # --edit: unique replace
 printf 'line one\nline two\nline three\n' > "$d/f.txt"
@@ -80,29 +114,44 @@ if printf '%s' "$after" | grep -q ready; then printf 'ok   shell works after tim
 else printf 'FAIL shell works after timeout\n'; fail=$((fail + 1)); fi
 /bin/sh "$SEED" --shell-stop "$sess2" >/dev/null 2>&1 || :
 
-# install with a stub model (no network)
+# install must not call the model
 stub=$d/stub
-cat > "$stub" <<'EOF'
+cat > "$stub" <<EOF
 #!/bin/sh
-n=$(cat "${STUB_N:-/tmp/stub-n}" 2>/dev/null || echo 0); n=$((n + 1)); printf '%s\n' "$n" > "${STUB_N:-/tmp/stub-n}"
-printf '{"content":"installed","tool_calls":[],"usage":{"prompt_tokens":3,"completion_tokens":1}}\n'
+printf 'called\n' >> "$d/install-called"
+printf '{"content":"no","tool_calls":[],"usage":{}}\n'
 EOF
 chmod +x "$stub"
 
+rej=$d/reject
+mkdir -p "$rej"
+(
+  cd "$rej"
+  /bin/sh "$SEED" deepseek sk-TESTKEYNOTREAL "$d/must-not"
+) > "$d/rej.out" 2> "$d/rej.err" || true
+if grep -q 'usage:' "$d/rej.err" && [ ! -e "$d/must-not" ]; then
+  printf 'ok   extra install-dir rejected\n'
+else
+  printf 'FAIL extra install-dir rejected\n'; fail=$((fail + 1))
+fi
+
 cwd=$d/cwd
 mkdir -p "$cwd"
-inst=$d/inst
 STUB_N=$d/stub-n
 export STUB_N
 printf '0\n' > "$STUB_N"
 (
   cd "$cwd"
   SEED_LLM_STUB=$stub \
-    /bin/sh "$SEED" deepseek sk-TESTKEYNOTREAL "$inst"
+    /bin/sh "$SEED" deepseek sk-TESTKEYNOTREAL
 ) > "$d/out" 2> "$d/err" || true
+if [ -f "$d/install-called" ]; then
+  printf 'FAIL install did not call the model\n'; fail=$((fail + 1))
+else
+  printf 'ok   install did not call the model\n'
+fi
 
-ck "install wrote cwd .env" test -f "$cwd/.env"
-ck "install wrote install .env" test -f "$inst/.env"
+ck "install wrote .env in cwd" test -f "$cwd/.env"
 if mode=$(stat -c '%a' "$cwd/.env" 2>/dev/null); then
   :
 else
@@ -113,20 +162,27 @@ ck "env has key field" grep -q '^LLM_API_KEY=' "$cwd/.env"
 ck "key not in stderr" awk 'BEGIN{c=0} /sk-TESTKEYNOTREAL/{c=1} END{exit c}' "$d/err"
 ck "key not in stdout" awk 'BEGIN{c=0} /sk-TESTKEYNOTREAL/{c=1} END{exit c}' "$d/out"
 ck "gitignore mentions .env" grep -qx '.env' "$cwd/.gitignore"
-if grep -q '装好了' "$d/err"; then printf 'ok   stub install verified\n'
+if grep -q 'installed:' "$d/err"; then printf 'ok   stub install verified\n'
 else printf 'FAIL stub install verified\n'; fail=$((fail + 1)); fi
-ck "bin/agent exists" test -x "$inst/bin/agent"
-ck "bin/edit exists" test -x "$inst/bin/edit"
-ck "bin/shell exists" test -x "$inst/bin/shell"
-ck "bin/llm exists" test -x "$inst/bin/llm"
-ck "agent syntax" /bin/sh -n "$inst/bin/agent"
-ck "no host home path in agent shim" awk 'BEGIN{c=0} /\/Users\//{c=1} END{exit c}' "$inst/bin/agent"
-
-intro=$($inst/bin/agent </dev/null 2>&1 || true)
-if printf '%s' "$intro" | grep -q '当前目录'; then
-  printf 'ok   agent prints Chinese banner\n'
+if grep -E '装好了|错误：|验收挂了' "$d/err" >/dev/null; then
+  printf 'FAIL seed install stayed machine-English\n'; fail=$((fail + 1))
 else
-  printf 'FAIL agent prints Chinese banner\n'; fail=$((fail + 1))
+  printf 'ok   seed install stayed machine-English\n'
+fi
+ck "bin/agent exists" test -x "$cwd/bin/agent"
+ck "bin/edit exists" test -x "$cwd/bin/edit"
+ck "bin/shell exists" test -x "$cwd/bin/shell"
+ck "bin/llm exists" test -x "$cwd/bin/llm"
+ck "agent syntax" /bin/sh -n "$cwd/bin/agent"
+ck "no host home path in agent shim" awk 'BEGIN{c=0} /\/Users\//{c=1} END{exit c}' "$cwd/bin/agent"
+
+intro=$($cwd/bin/agent </dev/null 2>&1 || true)
+if printf '%s' "$intro" | grep -q '当前目录\|能在当前目录'; then
+  printf 'FAIL agent stays quiet on open\n'; fail=$((fail + 1))
+elif printf '%s' "$intro" | grep -q '>'; then
+  printf 'ok   agent stays quiet on open\n'
+else
+  printf 'FAIL agent stays quiet on open\n'; fail=$((fail + 1))
 fi
 ck "agent exits on EOF" true
 
@@ -145,7 +201,7 @@ work=$d/work
 mkdir -p "$work"
 (
   cd "$work"
-  SEED_LLM_STUB=$stub STUB_N=$STUB_N "$inst/bin/agent" --oneshot 'where am i'
+  SEED_LLM_STUB=$stub STUB_N=$STUB_N "$cwd/bin/agent" --oneshot 'where am i'
 ) > "$d/one.out" 2> "$d/one.err" || true
 if grep -q 'done' "$d/one.out"; then printf 'ok   oneshot final answer only-ish\n'
 else printf 'FAIL oneshot final answer only-ish\n'; fail=$((fail + 1)); fi
@@ -178,7 +234,7 @@ mkdir -p "$repl"
 (
   cd "$repl"
   export SEED_LLM_STUB=$stub STUB_N=$STUB_N
-  printf '%s\n%s\n' 'make a box and enter it' 'where am i' | "$inst/bin/agent"
+  printf '%s\n%s\n' 'make a box and enter it' 'where am i' | "$cwd/bin/agent"
 ) > "$d/repl.out" 2> "$d/repl.err" || true
 if grep -q 'made-box' "$d/repl.out" && grep -q 'still-in-box' "$d/repl.out"; then
   printf 'ok   interactive two turns\n'
@@ -193,23 +249,21 @@ else
   printf 'FAIL interactive shell persisted cd\n'; fail=$((fail + 1))
 fi
 
-# model that never stops still passes if shims are already on disk
-cat > "$stub" <<'EOF'
-#!/bin/sh
-printf '{"content":"","tool_calls":[{"id":"loop","name":"shell","arguments":"{\\"command\\":\\"pwd\\"}"}],"usage":{"prompt_tokens":1,"completion_tokens":1}}\n'
-EOF
-printf '0\n' > "$STUB_N"
+# install is offline: no stub, no network
 cwd2=$d/cwd2
 mkdir -p "$cwd2"
-inst2=$d/inst2
 (
   cd "$cwd2"
-  SEED_LLM_STUB=$stub SEED_MAX_ROUNDS=2 \
-    /bin/sh "$SEED" deepseek sk-TESTKEYNOTREAL "$inst2"
+  /bin/sh "$SEED" deepseek sk-TESTKEYNOTREAL
 ) > "$d/cap.out" 2> "$d/cap.err" || true
-ck "max-rounds still wrote agent" test -x "$inst2/bin/agent"
-if grep -q '装好了' "$d/cap.err"; then printf 'ok   max-rounds still verifies\n'
-else printf 'FAIL max-rounds still verifies\n'; fail=$((fail + 1)); fi
+ck "offline install wrote agent" test -x "$cwd2/bin/agent"
+if grep -q 'installed:' "$d/cap.err"; then printf 'ok   offline install verified\n'
+else printf 'FAIL offline install verified\n'; fail=$((fail + 1)); fi
+if grep -q '\[seed\] tokens' "$d/cap.err" "$d/err"; then
+  printf 'FAIL install has no token heartbeat\n'; fail=$((fail + 1))
+else
+  printf 'ok   install has no token heartbeat\n'
+fi
 
 [ "$fail" -eq 0 ] || { printf '\nSEED-PACKAGE FAIL: %s\n' "$fail"; exit 1; }
 printf '\nSEED-PACKAGE PASS\n'

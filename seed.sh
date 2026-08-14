@@ -1,80 +1,23 @@
 #!/bin/sh
-# seed.sh — one-file installer package (LOOP / SYSTEM / TASK in memory).
-#   sh seed.sh deepseek sk-xxxx [install-dir]
-#   sh seed.sh [install-dir]          # resume, credentials from .env
-#   sh seed.sh --selftest
+# Packed from build/. Do not edit. Change build/ and run: sh build/pack.sh
+#   sh seed.sh deepseek sk-xxxx
 set -eu
 umask 077
 
 SELF=$(CDPATH= cd "$(dirname "$0")" && pwd -P)/$(basename "$0")
-MAX_ROUNDS=${SEED_MAX_ROUNDS:-40}
 AGENT_MAX_ROUNDS=${AGENT_MAX_ROUNDS:-20}
 ACTION_TIMEOUT=${SEED_ACTION_TIMEOUT:-180}
 MAX_OBS_BYTES=${SEED_MAX_OBS_BYTES:-16384}
 HTTP_TIMEOUT=${SEED_HTTP_TIMEOUT:-300}
 LAUNCH_CWD=$(pwd -P)
 
-die() { printf '错误：%s\n' "$1" >&2; exit "${2:-70}"; }
-heartbeat() { printf '\r[seed] tokens prompt=%s completion=%s' "${1:-0}" "${2:-0}" >&2; }
+die() { printf 'error: %s\n' "$1" >&2; exit "${2:-70}"; }
 
 usage() {
-  cat >&2 <<'EOF'
-用法：
-  sh seed.sh deepseek <API_KEY> [目标目录]  开始安装（或把渠道写成完整 URL）
-  sh seed.sh [目标目录]                     继续 / 重装（凭据读 .env）
-  sh seed.sh --selftest                     离线自测，不联网
-默认装到当前目录。装好后：sh bin/agent
-EOF
+  printf 'usage: sh seed.sh deepseek <API_KEY>\n' >&2
 }
 
-need() { command -v "$1" >/dev/null 2>&1 || die "需要 $1。" 69; }
-
-# ----------------------------------------------------------------- cabins
-
-cabin_system() {
-  cat <<EOF
-You are an installer, not a chat window. You have exactly two tools via tool_calls: shell (persistent) and edit (unique string replace).
-The seed already wrote $INSTALL/seed.sh and $INSTALL/bin/{agent,llm,edit,shell}. Inspect with short commands, fix only what is broken, then stop.
-Never invoke seed.sh as an installer. Never call verify_install. Never cat the entire seed.sh. Never start a nested agent loop or a long-running command.
-The product workspace is the directory where the human launches bin/agent — never bake a host absolute workspace path into the agent.
-When bin/agent exists, prints a Chinese banner mentioning 当前目录, and has no hardcoded workspace path, stop: final text only, no more tool_calls. The seed verifies the install itself.
-Host facts:
-$FACTS
-EOF
-}
-
-cabin_task() {
-  cat <<EOF
-Confirm the interactive agent at $INSTALL is ready: sh $INSTALL/bin/agent
-Check with short ls / head / banner (stdin EOF). Do not re-run the installer. Do not run verify_install. Stop as soon as the shims look correct.
-EOF
-}
-
-cabin_product_system() {
-  cat <<'EOF'
-You are a coding agent. You have exactly two tools via tool_calls: shell (a persistent login shell) and edit (unique string replace in a file).
-The workspace is the current directory at launch. Look before you edit. After edits, check your work with shell.
-Do not stream your process to the human. When the task is done, reply with a short final answer and no tool_calls.
-EOF
-}
-
-cabin_banner() {
-  cat <<'EOF'
-能在当前目录改文件、跑命令。建议先看再改，改完自己检查。
-空行或 Ctrl-D 退出。
-EOF
-}
-
-tools_json() {
-  cat <<'EOF'
-[
-  {"type":"function","function":{"name":"shell","description":"Run a command in the persistent shell. cwd and environment persist.","parameters":{"type":"object","properties":{"command":{"type":"string"}},"required":["command"]}}},
-  {"type":"function","function":{"name":"edit","description":"Replace old_text with new_text in path. old_text must match exactly once.","parameters":{"type":"object","properties":{"path":{"type":"string"},"old_text":{"type":"string"},"new_text":{"type":"string"}},"required":["path","old_text","new_text"]}}}
-]
-EOF
-}
-
-# ----------------------------------------------------------------- env
+need() { command -v "$1" >/dev/null 2>&1 || die "need $1" 69; }
 
 write_env_file() {
   dest=$1
@@ -115,7 +58,7 @@ resolve_provider() {
       LLM_MODEL=${LLM_MODEL:-deepseek-v4-flash}
       LLM_EXTRA=${LLM_EXTRA:-'{}'}
       LLM_PROVIDER=custom ;;
-    *) die "不认识的渠道：$1（用 deepseek，或完整 API URL）" 64 ;;
+    *) die "unknown provider: $1 (use deepseek or a full API URL)" 64 ;;
   esac
   LLM_API_KEY=$2
 }
@@ -130,10 +73,25 @@ install=${INSTALL:-}
 launch_cwd=$LAUNCH_CWD"
 }
 
-# ----------------------------------------------------------------- edit
+cabin_product_system() {
+  cat <<'EOF'
+You are a coding agent. You have exactly two tools via tool_calls: shell (a persistent login shell) and edit (unique string replace in a file).
+The workspace is the current directory at launch. Look before you edit. After edits, check your work with shell.
+Do not stream your process to the human. When the task is done, reply with a short final answer and no tool_calls.
+EOF
+}
+
+tools_json() {
+  cat <<'EOF'
+[
+  {"type":"function","function":{"name":"shell","description":"Run a command in the persistent shell. cwd and environment persist.","parameters":{"type":"object","properties":{"command":{"type":"string"}},"required":["command"]}}},
+  {"type":"function","function":{"name":"edit","description":"Replace old_text with new_text in path. old_text must match exactly once.","parameters":{"type":"object","properties":{"path":{"type":"string"},"old_text":{"type":"string"},"new_text":{"type":"string"}},"required":["path","old_text","new_text"]}}}
+]
+EOF
+}
 
 edit_main() {
-  [ "$#" -eq 3 ] || die '用法: --edit PATH OLD NEW' 64
+  [ "$#" -eq 3 ] || die 'usage: --edit PATH OLD NEW' 64
   need jq
   path=$1 old=$2 new=$3
   [ -n "$old" ] || { printf 'edit: old_text is empty\n' >&2; return 2; }
@@ -156,8 +114,6 @@ edit_main() {
   fi
   mv "$tmp" "$path"
 }
-
-# --------------------------------------------------------- persistent shell
 
 shell_init() {
   session=$1
@@ -264,60 +220,23 @@ clip_file() {
   echo
 }
 
-# ----------------------------------------------------------------- model
-
-assemble_stream() {
+parse_turn() {
   need jq
-  jq -n --rawfile raw "$1" '
-    def events:
-      ($raw | fromjson? // null) as $one
-      | if ($one | type) == "object" then
-          [$one]
-        else
-          [$raw
-            | split("\n")[]
-            | rtrimstr("\r")
-            | if startswith("data: ") then .[6:] else . end
-            | select(. != "" and . != "[DONE]")
-            | fromjson? // empty]
-        end;
-    def add_delta_tools($ts):
-      reduce $ts[] as $t (.;
-        ($t.index // 0 | tostring) as $i
-        | .tools[$i] = ((.tools[$i] // {id:"",name:"",arguments:""})
-          | .id = (if $t.id then $t.id else .id end)
-          | .name += ($t.function.name // "")
-          | .arguments += ($t.function.arguments // "")));
-    def add_msg_tools($ts):
-      reduce $ts[] as $t (.;
-        (([.tools | keys[] | tonumber] | max // -1) + 1 | tostring) as $i
-        | .tools[$i] = {
-            id: ($t.id // ""),
-            name: ($t.function.name // ""),
-            arguments: ($t.function.arguments // "")
-          });
-    reduce events[] as $d (
-      {content:"", tools:{}, usage:{}};
-      (($d.choices // [{}])[0]) as $ch
-      | ($ch.delta // {}) as $delta
-      | ($ch.message // {}) as $msg
-      | .content += ($delta.content // "")
-      | .content += ($msg.content // "")
-      | if $d.usage then .usage = $d.usage else . end
-      | add_delta_tools($delta.tool_calls // [])
-      | add_msg_tools($msg.tool_calls // [])
-    )
+  jq '
+    (.choices[0].message // {}) as $m
     | {
-        content,
+        content: ($m.content // ""),
         tool_calls: (
-          .tools
-          | to_entries
-          | sort_by(.key | tonumber)
-          | map(.value)
+          ($m.tool_calls // [])
+          | map({
+              id: (.id // ""),
+              name: (.function.name // ""),
+              arguments: (.function.arguments // "")
+            })
         ),
-        usage
+        usage: (.usage // {})
       }
-  '
+  ' "$1"
 }
 
 model_turn() {
@@ -328,32 +247,32 @@ model_turn() {
     return 0
   fi
   load_env
-  [ -n "${LLM_API_KEY:-}" ] || die '找不到 API Key（.env 或环境变量）。' 64
+  [ -n "${LLM_API_KEY:-}" ] || die 'missing API key (.env or environment)' 64
   need curl
   need jq
   work=$(mktemp -d "${TMPDIR:-/tmp}/seed-llm.XXXXXX")
   tools_json > "$work/tools.json"
   extra=${LLM_EXTRA:-'{}'}
   jq -n --arg m "$LLM_MODEL" --slurpfile msg "$msgs" --slurpfile t "$work/tools.json" --argjson x "$extra" \
-    '{model:$m,stream:true,stream_options:{include_usage:true},messages:$msg[0],tools:$t[0]} + $x' \
+    '{model:$m,stream:false,messages:$msg[0],tools:$t[0]} + $x' \
     > "$work/req.json"
   printf 'Authorization: Bearer %s\nContent-Type: application/json\n' "$LLM_API_KEY" > "$work/h"
   set +e
-  curl -N -q -sS --connect-timeout 15 --max-time "$HTTP_TIMEOUT" -X POST \
+  curl -q -sS --connect-timeout 15 --max-time "$HTTP_TIMEOUT" -X POST \
     -H "@$work/h" --data-binary "@$work/req.json" \
     -w '\n__HTTP__%{http_code}\n' "$LLM_API_URL" > "$work/raw"
   cs=$?
   set -e
-  [ "$cs" -eq 0 ] || { rm -rf "$work"; die "llm: 网络请求失败（curl=$cs）。" 71; }
+  [ "$cs" -eq 0 ] || { rm -rf "$work"; die "llm: network failed (curl=$cs)" 71; }
   code=$(awk '/^__HTTP__/{print substr($0,9)}' "$work/raw" | tail -1)
   case $code in
     2*) : ;;
-    401|403) rm -rf "$work"; die "llm: API Key 被拒绝（HTTP $code）。" 77 ;;
+    401|403) rm -rf "$work"; die "llm: API key rejected (HTTP $code)" 77 ;;
     *) rm -rf "$work"; die "llm: HTTP ${code:-000}" 72 ;;
   esac
-  awk '!/^__HTTP__/' "$work/raw" > "$work/sse"
-  assemble_stream "$work/sse" > "$dest"
-  cp "$work/sse" "$dest.sse" 2>/dev/null || :
+  awk '!/^__HTTP__/' "$work/raw" > "$work/body"
+  parse_turn "$work/body" > "$dest"
+  cp "$work/body" "$dest.raw" 2>/dev/null || :
   rm -rf "$work"
 }
 
@@ -362,7 +281,7 @@ llm_main() {
   while [ "$#" -gt 0 ]; do
     case $1 in
       --messages) msgs=$2; shift 2 ;;
-      *) die "llm: 未知参数 $1" 64 ;;
+      *) die "llm: unknown argument $1" 64 ;;
     esac
   done
   work=$(mktemp -d "${TMPDIR:-/tmp}/seed-llmcli.XXXXXX")
@@ -370,14 +289,12 @@ llm_main() {
   if [ -n "$msgs" ]; then cp "$msgs" "$work/m.json"
   else
     cat > "$work/p.txt"
-    [ -s "$work/p.txt" ] || die 'llm: stdin 为空。' 64
+    [ -s "$work/p.txt" ] || die 'llm: empty stdin' 64
     jq -Rs '[{role:"user",content:.}]' < "$work/p.txt" > "$work/m.json"
   fi
   model_turn "$work/m.json" "$work/t.json"
   jq -r '.content // empty' "$work/t.json"
 }
-
-# ----------------------------------------------------------------- loop
 
 exec_tool() {
   session=$1
@@ -424,12 +341,6 @@ run_loop() {
   final=
   while [ "$round" -le "$max" ]; do
     model_turn "$msgs" "$evdir/turn-$round.json"
-    pt=$(jq -r '.usage.prompt_tokens // 0' "$evdir/turn-$round.json")
-    ct=$(jq -r '.usage.completion_tokens // 0' "$evdir/turn-$round.json")
-    if [ "$print_final" -eq 0 ]; then
-      heartbeat "$pt" "$ct"
-      printf '\n' >&2
-    fi
     content=$(jq -r '.content // empty' "$evdir/turn-$round.json")
     ntools=$(jq '.tool_calls | length' "$evdir/turn-$round.json")
     if [ "$ntools" -gt 0 ]; then
@@ -456,7 +367,7 @@ run_loop() {
   done
   if [ "$round" -gt "$max" ] && [ -z "$final" ]; then
     if [ "$print_final" -eq 1 ]; then
-      printf '达到轮数上限，任务没有做完。\n'
+      printf 'round limit reached; task unfinished\n'
       return 0
     fi
     return 75
@@ -464,8 +375,6 @@ run_loop() {
   [ "$print_final" -eq 1 ] && [ -n "$final" ] && printf '%s\n' "$final"
   return 0
 }
-
-# ----------------------------------------------------------------- install bits
 
 write_shims() {
   mkdir -p "$INSTALL/bin"
@@ -486,23 +395,25 @@ verify_install() {
   for f in agent llm edit shell; do
     p=$INSTALL/bin/$f
     if [ ! -x "$p" ]; then
-      printf '  FAIL 缺少 %s\n' "$p" >&2; bad=$((bad + 1))
+      printf '  FAIL missing %s\n' "$p" >&2; bad=$((bad + 1))
     elif ! /bin/sh -n "$p" 2>/dev/null; then
-      printf '  FAIL %s 语法检查失败\n' "$p" >&2; bad=$((bad + 1))
+      printf '  FAIL %s failed syntax check\n' "$p" >&2; bad=$((bad + 1))
     fi
   done
-  [ -f "$INSTALL/seed.sh" ] || { printf '  FAIL 缺少 seed.sh\n' >&2; bad=$((bad + 1)); }
+  [ -f "$INSTALL/seed.sh" ] || { printf '  FAIL missing seed.sh\n' >&2; bad=$((bad + 1)); }
   if [ ! -f "$LAUNCH_CWD/.env" ] || [ ! -f "$INSTALL/.env" ]; then
-    printf '  FAIL .env 不完整\n' >&2; bad=$((bad + 1))
+    printf '  FAIL incomplete .env\n' >&2; bad=$((bad + 1))
   else
     k1=$(jq -r -n --rawfile e "$LAUNCH_CWD/.env" '$e | split("\n") | map(select(startswith("LLM_API_KEY="))) | .[0] | split("=")[1]' 2>/dev/null || grep '^LLM_API_KEY=' "$LAUNCH_CWD/.env" | sed 's/^LLM_API_KEY=//')
-    [ -n "$k1" ] || { printf '  FAIL .env 没有 key\n' >&2; bad=$((bad + 1)); }
+    [ -n "$k1" ] || { printf '  FAIL .env has no key\n' >&2; bad=$((bad + 1)); }
   fi
   intro=$(LAUNCH_CWD=$LAUNCH_CWD /bin/sh "$INSTALL/bin/agent" </dev/null 2>&1 || true)
-  printf '%s' "$intro" | grep -q '当前目录' || { printf '  FAIL 引导语缺失\n' >&2; bad=$((bad + 1)); }
+  printf '%s' "$intro" | grep -q '>' || { printf '  FAIL agent prompt missing\n' >&2; bad=$((bad + 1)); }
+  extra=$(printf '%s' "$intro" | tr -d '>\n ')
+  [ -z "$extra" ] || { printf '  FAIL agent lectured on open\n' >&2; bad=$((bad + 1)); }
   baked=$(printf '/%s/|/%s/' Users home)
   if grep -E "$baked" "$INSTALL/bin/agent" "$INSTALL/bin/edit" "$INSTALL/bin/llm" "$INSTALL/bin/shell" >/dev/null 2>&1; then
-    printf '  FAIL shim 写死了本机路径\n' >&2; bad=$((bad + 1))
+    printf '  FAIL shim baked a host path\n' >&2; bad=$((bad + 1))
   fi
   w=$(mktemp -d "${TMPDIR:-/tmp}/seed-ver.XXXXXX")
   w=$(CDPATH= cd "$w" && pwd)
@@ -527,42 +438,24 @@ STUB
   ) > "$w/out" 2> "$w/err"
   set -e
   if ! grep -q ok "$w/out"; then
-    printf '  FAIL 假 tool_calls 没有跑通\n' >&2; bad=$((bad + 1))
+    printf '  FAIL stub tool_calls did not run\n' >&2; bad=$((bad + 1))
   fi
   if ! grep -FR "$w" "$w/.agent-runs" >/dev/null 2>&1; then
-    printf '  FAIL 假调用工作区不是临时目录\n' >&2; bad=$((bad + 1))
+    printf '  FAIL stub workspace was not the temp dir\n' >&2; bad=$((bad + 1))
   fi
   rm -rf "$w"
-  [ "$bad" -eq 0 ] || die "验收挂了 $bad 项。" 76
+  [ "$bad" -eq 0 ] || die "verify failed: $bad check(s)" 76
 }
 
 install_main() {
   need jq
-  [ -n "${SEED_LLM_STUB:-}" ] || need curl
-  probe
   write_env_file "$LAUNCH_CWD/.env"
   write_env_file "$INSTALL/.env"
   ensure_gitignore "$LAUNCH_CWD"
   write_shims
-  RUN_DIR=$INSTALL/.runs/$(date -u +%Y%m%dT%H%M%SZ)-$$
-  mkdir -p "$RUN_DIR"
-  sess=$RUN_DIR/session
-  shell_init "$sess" "$INSTALL"
-  set +e
-  run_loop "$(cabin_system)" "$(cabin_task)" "$sess" "$RUN_DIR" "$MAX_ROUNDS" 0
-  ls=$?
-  set -e
-  shell_stop "$sess"
-  [ "$ls" -eq 0 ] || [ "$ls" -eq 75 ] || exit "$ls"
-  if [ "$ls" -eq 75 ]; then
-    printf '模型跑满 %s 轮，改看磁盘验收。\n' "$MAX_ROUNDS" >&2
-  fi
   verify_install
-  printf '%s\n' 0 > "$RUN_DIR/exit-code"
-  printf '\n============ 装好了 ============\n  %s/bin/agent\n================================\n' "$INSTALL" >&2
+  printf 'installed: %s/bin/agent\n' "$INSTALL" >&2
 }
-
-# ----------------------------------------------------------------- agent
 
 agent_main() {
   INSTALL=$(CDPATH= cd "$(dirname "$SELF")" && pwd -P)
@@ -574,7 +467,6 @@ agent_main() {
   elif [ "$#" -ge 1 ]; then
     oneshot=1; task=$*
   fi
-  cabin_banner
   if [ "$oneshot" -eq 0 ]; then
     printf '> ' >&2
     if ! IFS= read -r line; then printf '\n' >&2; exit 0; fi
@@ -610,49 +502,39 @@ agent_main() {
   shell_stop "$sess" 2>/dev/null || :
 }
 
-# ----------------------------------------------------------------- selftest
-
 selftest() {
   t=$(CDPATH= cd "$(dirname "$SELF")" && pwd -P)/tests/seed-package.sh
-  [ -f "$t" ] || die "离线套件在 $t（请在仓库根目录跑）。" 69
+  [ -f "$t" ] || die "offline suite missing: $t (run from repo root)" 69
   exec /bin/sh "$t"
 }
 
-# ----------------------------------------------------------------- main
-
 case ${1:-} in
-  --assemble) shift; assemble_stream "$1"; exit 0 ;;
+  --parse-turn) shift; parse_turn "$1"; exit 0 ;;
   --llm) shift; llm_main "$@"; exit 0 ;;
   --edit) shift; edit_main "$@"; exit 0 ;;
   --shell-init) shift; probe; shell_init "$1" "$2"; exit 0 ;;
   --shell) shift; shell_run "$1" "$2"; exit 0 ;;
   --shell-stop) shift; shell_stop "$1"; exit 0 ;;
-  --shell-cli) shift; die 'shell CLI：由 agent 内部调用。' 64 ;;
+  --shell-cli) shift; die 'shell CLI is internal to agent' 64 ;;
   --agent) shift; agent_main "$@"; exit 0 ;;
   --selftest) selftest; exit 0 ;;
   -h|--help) usage; exit 0 ;;
 esac
 
+INSTALL=.
 case ${1:-} in
-  '') INSTALL=${SEED_INSTALL:-.} ;;
+  '')
+    load_env
+    [ -n "${LLM_API_KEY:-}" ] || die "first run: sh seed.sh deepseek <API_KEY>" 64
+    LLM_PROVIDER=${LLM_PROVIDER:-deepseek}
+    LLM_API_URL=${LLM_API_URL:-https://api.deepseek.com/chat/completions}
+    LLM_MODEL=${LLM_MODEL:-deepseek-v4-flash} ;;
   -*) usage; exit 64 ;;
   *)
-    if [ "$#" -ge 2 ]; then
-      resolve_provider "$1" "$2"
-      INSTALL=${3:-.}
-    else
-      case $1 in
-        deepseek|http*://*)
-          die "第一次需要 key：sh seed.sh deepseek sk-xxxx" 64 ;;
-      esac
-      INSTALL=$1
-      load_env
-      [ -n "${LLM_API_KEY:-}" ] || die "$INSTALL 没有凭据。第一次：sh seed.sh deepseek sk-xxxx" 64
-      LLM_PROVIDER=${LLM_PROVIDER:-deepseek}
-      LLM_API_URL=${LLM_API_URL:-https://api.deepseek.com/chat/completions}
-      LLM_MODEL=${LLM_MODEL:-deepseek-v4-flash}
-    fi ;;
+    [ "$#" -eq 2 ] || { usage; exit 64; }
+    resolve_provider "$1" "$2" ;;
 esac
 mkdir -p "$INSTALL"
 INSTALL=$(CDPATH= cd "$INSTALL" && pwd -P)
 install_main
+
