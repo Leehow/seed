@@ -576,47 +576,6 @@ model_turn() {
   rm -rf "$work"
 }
 
-# One no-tools completion. Used by after_turn hooks (summary). Do not print to the human.
-model_complete_text() {
-  in_msgs=$1
-  dest=$2
-  work=$(mktemp -d "${TMPDIR:-/tmp}/seed-llmc.XXXXXX")
-  strip_msg_thinking "$in_msgs" "$work/msgs.json"
-  if [ -n "${SEED_LLM_STUB:-}" ]; then
-    "$SEED_LLM_STUB" --messages "$work/msgs.json" > "$dest"
-    rm -rf "$work"
-    return 0
-  fi
-  load_env
-  disable_thinking
-  [ -n "${LLM_API_KEY:-}" ] || { rm -rf "$work"; return 1; }
-  need curl
-  need jq
-  extra=${LLM_EXTRA:-'{}'}
-  jq -n --arg m "$LLM_MODEL" --slurpfile msg "$work/msgs.json" --argjson x "$extra" \
-    '{model:$m,stream:false,messages:$msg[0]} + $x' \
-    > "$work/req.json"
-  printf 'Authorization: Bearer %s\nContent-Type: application/json\n' "$LLM_API_KEY" > "$work/h"
-  set +e
-  curl -q -sS --connect-timeout 15 --max-time "$HTTP_TIMEOUT" -X POST \
-    -H "@$work/h" --data-binary "@$work/req.json" \
-    -w '\n__HTTP__%{http_code}\n' "$LLM_API_URL" > "$work/raw"
-  cs=$?
-  set -e
-  if [ "$cs" -ne 0 ]; then
-    rm -rf "$work"
-    return 1
-  fi
-  code=$(awk '/^__HTTP__/{print substr($0,9)}' "$work/raw" | tail -1)
-  case $code in
-    2*) : ;;
-    *) rm -rf "$work"; return 1 ;;
-  esac
-  awk '!/^__HTTP__/' "$work/raw" > "$work/body"
-  parse_turn "$work/body" > "$dest"
-  rm -rf "$work"
-}
-
 llm_main() {
   msgs=
   while [ "$#" -gt 0 ]; do
@@ -637,7 +596,82 @@ llm_main() {
   jq -r '.content // empty' "$work/t.json"
 }
 
-agent_after_turn() { :; }
+# Clear old fat tool bodies when prompt_tokens cross 70% of the window.
+# Protect SYSTEM. If there are at least two user turns, keep from the
+# second-to-last user; else keep from the second-to-last tool-call assistant.
+agent_compact() {
+  ac_msgs=$1
+  ac_tok=$2
+  ac_force=${3:-0}
+  [ "${INIT_STOP_WHEN_READY:-}" = 1 ] && return 0
+  [ -f "$ac_msgs" ] || return 0
+  case $ac_tok in
+    ''|*[!0-9]*) ac_tok=0 ;;
+  esac
+  case $ac_force in
+    1) : ;;
+    *) ac_force=0 ;;
+  esac
+  ac_win=128000
+  if [ -n "${INSTALL:-}" ] && [ -f "$INSTALL/agent-store/catalog.json" ]; then
+    ac_cw=$(jq -r '.context_window // empty' "$INSTALL/agent-store/catalog.json" 2>/dev/null || true)
+    case $ac_cw in
+      ''|*[!0-9]*) : ;;
+      *) ac_win=$ac_cw ;;
+    esac
+  fi
+  [ -n "${LLM_CONTEXT_WINDOW:-}" ] && ac_win=$LLM_CONTEXT_WINDOW
+  [ -n "${SLAB_CONTEXT_WINDOW:-}" ] && ac_win=$SLAB_CONTEXT_WINDOW
+  case $ac_win in
+    ''|*[!0-9]*) ac_win=128000 ;;
+  esac
+  ac_th=$((ac_win * 70 / 100))
+  if [ "$ac_force" -ne 1 ] && [ "$ac_tok" -lt "$ac_th" ]; then
+    return 0
+  fi
+  ac_protect=$(jq '
+    def users: [to_entries[] | select(.value.role=="user") | .key];
+    def groups: [to_entries[] | select(
+        .value.role=="assistant"
+        and ((.value.tool_calls // []) | length) > 0
+      ) | .key];
+    if (users | length) >= 2 then users[-2]
+    elif (groups | length) >= 2 then groups[-2]
+    else -1
+    end
+  ' "$ac_msgs" 2>/dev/null || echo -1)
+  case $ac_protect in
+    ''|*[!0-9-]*|-1) return 0 ;;
+  esac
+  [ "$ac_protect" -gt 0 ] || return 0
+  ac_need=$(jq -r --argjson p "$ac_protect" '
+    any(.[1:$p][];
+      .role=="tool"
+      and ((.content // "") | type=="string")
+      and ((.content // "") | length) > 200)
+  ' "$ac_msgs" 2>/dev/null || echo false)
+  [ "$ac_need" = true ] || return 0
+  ac_tmp=$(mktemp "${TMPDIR:-/tmp}/seed-cc.XXXXXX")
+  if jq --argjson p "$ac_protect" '
+    . as $m
+    | [
+        range(0; $m|length) as $i
+        | $m[$i]
+        | if ($i > 0) and ($i < $p) and (.role=="tool")
+            and ((.content // "") | type=="string")
+            and ((.content // "") | length) > 200
+          then .content = "[old tool output cleared]"
+          else .
+          end
+      ]
+  ' "$ac_msgs" > "$ac_tmp"
+  then
+    mv "$ac_tmp" "$ac_msgs"
+    printf 'compact: pruned\n' >&2
+  else
+    rm -f "$ac_tmp"
+  fi
+}
 
 tool_note() {
   name=$1
@@ -700,7 +734,7 @@ run_loop() {
   case $last_pt in
     ''|*[!0-9]*) last_pt=0 ;;
   esac
-  agent_after_turn "$msgs" "$last_pt" "$evdir" || true
+  agent_compact "$msgs" "$last_pt" || true
   round=1
   final=
   while [ "$round" -le "$max" ]; do
@@ -713,10 +747,7 @@ run_loop() {
         die "llm: context overflow" 73
       fi
       touch "$evdir/overflow-retried"
-      SLAB_COMPACT_FORCE=1
-      export SLAB_COMPACT_FORCE
-      agent_after_turn "$msgs" "$last_pt" "$evdir" || true
-      unset SLAB_COMPACT_FORCE
+      agent_compact "$msgs" "$last_pt" 1 || true
       set +e
       model_turn "$msgs" "$evdir/turn-$round.json"
       mt=$?
@@ -734,7 +765,7 @@ run_loop() {
       mkdir -p "$INSTALL/agent-store"
       printf '%s\n' "$last_pt" > "$INSTALL/agent-store/last-prompt-tokens"
     fi
-    agent_after_turn "$msgs" "$last_pt" "$evdir" || true
+    agent_compact "$msgs" "$last_pt" || true
     content=$(jq -r '.content // empty' "$evdir/turn-$round.json")
     ntools=$(jq '.tool_calls | length' "$evdir/turn-$round.json")
     if [ "$ntools" -gt 0 ]; then
@@ -977,74 +1008,6 @@ agent_run_hooks() {
       *) /bin/sh "$script" || true ;;
     esac
   done
-}
-
-agent_after_turn() {
-  at_msgs=$1
-  at_tok=$2
-  at_ev=$3
-  [ "${INIT_STOP_WHEN_READY:-}" = 1 ] && return 0
-  [ -n "${INSTALL:-}" ] || return 0
-  [ -f "$at_msgs" ] || return 0
-  store=$INSTALL/agent-store
-  catf=$store/catalog.json
-  [ -f "$catf" ] || return 0
-  jq -e '.hooks.after_turn | type=="array" and length>0' "$catf" >/dev/null 2>&1 || return 0
-  at_work=${at_ev:-$store}/hooks
-  mkdir -p "$at_work" "$store"
-  at_cw=$(jq -r '.context_window // empty' "$catf" 2>/dev/null || true)
-  [ -n "$at_cw" ] || at_cw=${SLAB_CONTEXT_WINDOW:-${LLM_CONTEXT_WINDOW:-128000}}
-  SLAB_MESSAGES=$at_msgs
-  SLAB_PROMPT_TOKENS=$at_tok
-  SLAB_CONTEXT_WINDOW=$at_cw
-  SLAB_HOOK_WORK=$at_work
-  export SLAB_MESSAGES SLAB_PROMPT_TOKENS SLAB_CONTEXT_WINDOW SLAB_HOOK_WORK
-  SLAB_COMPLETE_RESULT=
-  export SLAB_COMPLETE_RESULT
-  rm -f "$at_work/complete-request.json"
-  agent_run_hooks after_turn
-  at_req=$at_work/complete-request.json
-  [ -f "$at_req" ] || return 0
-  at_sys=$(jq -r '.system // empty' "$at_req")
-  at_user=$(jq -r '.user // empty' "$at_req")
-  rm -f "$at_req"
-  [ -n "$at_sys" ] && [ -n "$at_user" ] || return 0
-  at_in=$(mktemp "${TMPDIR:-/tmp}/seed-ccin.XXXXXX")
-  at_out=$(mktemp "${TMPDIR:-/tmp}/seed-ccout.XXXXXX")
-  jq -n --arg s "$at_sys" --arg u "$at_user" \
-    '[{role:"system",content:$s},{role:"user",content:$u}]' > "$at_in"
-  set +e
-  model_complete_text "$at_in" "$at_out"
-  at_es=$?
-  set -e
-  rm -f "$at_in"
-  if [ "$at_es" -ne 0 ] || [ ! -s "$at_out" ]; then
-    rm -f "$at_out"
-    at_n=0
-    [ -f "$at_work/compact-fails" ] && at_n=$(cat "$at_work/compact-fails")
-    case $at_n in
-      ''|*[!0-9]*) at_n=0 ;;
-    esac
-    printf '%s\n' $((at_n + 1)) > "$at_work/compact-fails"
-    return 0
-  fi
-  jq -r '.content // empty' "$at_out" > "$at_work/complete-result.txt"
-  rm -f "$at_out"
-  if [ ! -s "$at_work/complete-result.txt" ]; then
-    at_n=0
-    [ -f "$at_work/compact-fails" ] && at_n=$(cat "$at_work/compact-fails")
-    case $at_n in
-      ''|*[!0-9]*) at_n=0 ;;
-    esac
-    printf '%s\n' $((at_n + 1)) > "$at_work/compact-fails"
-    return 0
-  fi
-  rm -f "$at_work/compact-fails"
-  SLAB_COMPLETE_RESULT=$at_work/complete-result.txt
-  export SLAB_COMPLETE_RESULT
-  agent_run_hooks after_turn
-  SLAB_COMPLETE_RESULT=
-  export SLAB_COMPLETE_RESULT
 }
 
 agent_ready() {

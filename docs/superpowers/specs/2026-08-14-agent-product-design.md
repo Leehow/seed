@@ -83,10 +83,7 @@ oneshot 若尚未 `ready`：先走 1–6，再做那条任务。
     "init": "init.json"
   },
   "optional": {},
-  "hooks": {
-    "after_ready": ["host.sh"],
-    "system": ["host.sh"]
-  }
+  "hooks": {}
 }
 ```
 

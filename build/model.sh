@@ -145,47 +145,6 @@ model_turn() {
   rm -rf "$work"
 }
 
-# One no-tools completion. Used by after_turn hooks (summary). Do not print to the human.
-model_complete_text() {
-  in_msgs=$1
-  dest=$2
-  work=$(mktemp -d "${TMPDIR:-/tmp}/seed-llmc.XXXXXX")
-  strip_msg_thinking "$in_msgs" "$work/msgs.json"
-  if [ -n "${SEED_LLM_STUB:-}" ]; then
-    "$SEED_LLM_STUB" --messages "$work/msgs.json" > "$dest"
-    rm -rf "$work"
-    return 0
-  fi
-  load_env
-  disable_thinking
-  [ -n "${LLM_API_KEY:-}" ] || { rm -rf "$work"; return 1; }
-  need curl
-  need jq
-  extra=${LLM_EXTRA:-'{}'}
-  jq -n --arg m "$LLM_MODEL" --slurpfile msg "$work/msgs.json" --argjson x "$extra" \
-    '{model:$m,stream:false,messages:$msg[0]} + $x' \
-    > "$work/req.json"
-  printf 'Authorization: Bearer %s\nContent-Type: application/json\n' "$LLM_API_KEY" > "$work/h"
-  set +e
-  curl -q -sS --connect-timeout 15 --max-time "$HTTP_TIMEOUT" -X POST \
-    -H "@$work/h" --data-binary "@$work/req.json" \
-    -w '\n__HTTP__%{http_code}\n' "$LLM_API_URL" > "$work/raw"
-  cs=$?
-  set -e
-  if [ "$cs" -ne 0 ]; then
-    rm -rf "$work"
-    return 1
-  fi
-  code=$(awk '/^__HTTP__/{print substr($0,9)}' "$work/raw" | tail -1)
-  case $code in
-    2*) : ;;
-    *) rm -rf "$work"; return 1 ;;
-  esac
-  awk '!/^__HTTP__/' "$work/raw" > "$work/body"
-  parse_turn "$work/body" > "$dest"
-  rm -rf "$work"
-}
-
 llm_main() {
   msgs=
   while [ "$#" -gt 0 ]; do

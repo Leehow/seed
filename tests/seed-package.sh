@@ -61,16 +61,23 @@ if jq -r '.prompt' "$ROOT/plugins/agent/init.json" | grep -q description \
 else
   printf 'FAIL init prompt extracts skill metadata\n'; fail=$((fail + 1))
 fi
-if jq -e '.version=="15"' "$ROOT/plugins/agent/index.json" >/dev/null 2>&1; then
-  printf 'ok   agent plugin version 15\n'
+if jq -e '.version=="17"' "$ROOT/plugins/agent/index.json" >/dev/null 2>&1; then
+  printf 'ok   agent plugin version 17\n'
 else
-  printf 'FAIL agent plugin version 15\n'; fail=$((fail + 1))
+  printf 'FAIL agent plugin version 17\n'; fail=$((fail + 1))
 fi
-if jq -e '.machine_tree.host | type=="object" and has("ok") and has("projects") and has("home_top")' \
-  "$ROOT/plugins/agent/init.json" >/dev/null 2>&1; then
-  printf 'ok   init tree has empty host map\n'
+if jq -e '(.machine_tree | has("host") | not)
+    and (.prompt | test("top-level host") | not)
+    and (.machine_tree.system.retrieve | test("top-level host") | not)' \
+  "$ROOT/plugins/agent/init.json" >/dev/null 2>&1 \
+  && [ ! -f "$ROOT/plugins/agent/host.sh" ] \
+  && ! jq -e '.hooks.after_ready | index("host.sh")' \
+    "$ROOT/plugins/agent/index.json" >/dev/null 2>&1 \
+  && ! jq -e '.hooks.system | index("host.sh")' \
+    "$ROOT/plugins/agent/index.json" >/dev/null 2>&1; then
+  printf 'ok   host map is not an agent plugin\n'
 else
-  printf 'FAIL init tree has empty host map\n'; fail=$((fail + 1))
+  printf 'FAIL host map is not an agent plugin\n'; fail=$((fail + 1))
 fi
 if grep -qE 'host_inventory|host_blurb|home_top' "$BUILD/product.sh" \
   || grep -q 'host object' "$BUILD/prompts/product-system.txt"; then
@@ -78,30 +85,16 @@ if grep -qE 'host_inventory|host_blurb|home_top' "$BUILD/product.sh" \
 else
   printf 'ok   seed does not embed host map\n'
 fi
-if [ -f "$ROOT/plugins/agent/host.sh" ] \
-  && grep -q home_top "$ROOT/plugins/agent/host.sh" \
-  && jq -e '.hooks.after_ready | index("host.sh")' \
-    "$ROOT/plugins/agent/index.json" >/dev/null 2>&1 \
-  && grep -q 'agent_run_hooks' "$BUILD/product.sh"; then
-  printf 'ok   host map lives in agent plugin\n'
+if grep -q 'old tool output cleared' "$BUILD/loop.sh" \
+  && ! grep -q 'CONTEXT COMPACTION' "$BUILD/loop.sh" \
+  && ! grep -q 'model_complete_text' "$BUILD/model.sh" \
+  && ! grep -q 'agent_after_turn' "$BUILD/product.sh" \
+  && [ ! -f "$ROOT/plugins/agent/compact.sh" ] \
+  && ! jq -e '.hooks.after_turn | index("compact.sh")' \
+    "$ROOT/plugins/agent/index.json" >/dev/null 2>&1; then
+  printf 'ok   compact is jq in the loop\n'
 else
-  printf 'FAIL host map lives in agent plugin\n'; fail=$((fail + 1))
-fi
-if grep -q 'old tool output cleared' "$BUILD/product.sh" \
-  || grep -q 'CONTEXT COMPACTION' "$BUILD/product.sh" \
-  || grep -q 'CONTEXT COMPACTION' "$BUILD/prompts/product-system.txt"; then
-  printf 'FAIL seed does not embed compact\n'; fail=$((fail + 1))
-else
-  printf 'ok   seed does not embed compact\n'
-fi
-if [ -f "$ROOT/plugins/agent/compact.sh" ] \
-  && grep -q 'old tool output cleared' "$ROOT/plugins/agent/compact.sh" \
-  && jq -e '.hooks.after_turn | index("compact.sh")' \
-    "$ROOT/plugins/agent/index.json" >/dev/null 2>&1 \
-  && grep -q 'agent_after_turn' "$BUILD/product.sh"; then
-  printf 'ok   compact lives in agent plugin\n'
-else
-  printf 'FAIL compact lives in agent plugin\n'; fail=$((fail + 1))
+  printf 'FAIL compact is jq in the loop\n'; fail=$((fail + 1))
 fi
 if grep -q "The task is the human's last message" "$BUILD/prompts/product-system.txt" \
   && grep -q 'Do not replace it with' "$BUILD/prompts/product-system.txt" \
@@ -112,9 +105,9 @@ else
 fi
 if grep -q 'skill_catalog' "$BUILD/product.sh" \
   && grep -q 'available_skills' "$BUILD/product.sh"; then
-  printf 'ok   host injects skill catalog\n'
+  printf 'ok   product injects skill catalog\n'
 else
-  printf 'FAIL host injects skill catalog\n'; fail=$((fail + 1))
+  printf 'FAIL product injects skill catalog\n'; fail=$((fail + 1))
 fi
 if jq -r '.machine_tree.system.retrieve' "$ROOT/plugins/agent/init.json" \
     | grep -q 'agentskills.io/specification' \
@@ -124,7 +117,7 @@ if jq -r '.machine_tree.system.retrieve' "$ROOT/plugins/agent/init.json" \
     | grep -q "The task is the human's last message" \
   && ! jq -r '.machine_tree.system.retrieve' "$ROOT/plugins/agent/init.json" \
     | grep -q websearch \
-  && jq -r '.machine_tree.system.retrieve' "$ROOT/plugins/agent/init.json" \
+  && ! jq -r '.machine_tree.system.retrieve' "$ROOT/plugins/agent/init.json" \
     | grep -q 'top-level host'; then
   printf 'ok   retrieve keeps human web queries\n'
 else
@@ -500,11 +493,8 @@ else
 fi
 
 # compact: high prompt_tokens + three tool rounds; first fat tool is pruned
-mkdir -p "$cwd/agent-store/plugins"
-if [ -f "$ROOT/plugins/agent/compact.sh" ]; then
-  cp "$ROOT/plugins/agent/compact.sh" "$cwd/agent-store/plugins/compact.sh"
-fi
-printf '%s\n' '{"version":"14","hooks":{"after_turn":["compact.sh"]},"context_window":128000}' \
+mkdir -p "$cwd/agent-store"
+printf '%s\n' '{"version":"17","context_window":128000}' \
   > "$cwd/agent-store/catalog.json"
 cwork=$d/cwork
 mkdir -p "$cwork"
@@ -512,17 +502,6 @@ awk 'BEGIN{for(i=0;i<300;i++)printf "X"}' > "$cwork/fat.txt"
 printf '\n' >> "$cwork/fat.txt"
 cat > "$stub" <<'EOF'
 #!/bin/sh
-msgs=
-while [ "$#" -gt 0 ]; do
-  case $1 in
-    --messages) msgs=$2; shift 2 ;;
-    *) shift ;;
-  esac
-done
-if [ -n "$msgs" ] && grep -q 'Active Task' "$msgs"; then
-  printf '%s\n' '{"content":"## Goal\nread fat\n## Active Task\ndone","tool_calls":[],"usage":{"prompt_tokens":10,"completion_tokens":8}}'
-  exit 0
-fi
 n=$(cat "${STUB_N}" 2>/dev/null || echo 0); n=$((n + 1)); printf '%s\n' "$n" > "${STUB_N}"
 case $n in
   1) printf '%s\n' '{"content":"","tool_calls":[{"id":"c1","name":"shell","arguments":"{\"command\":\"cat fat.txt\"}"}],"usage":{"prompt_tokens":1000,"completion_tokens":1}}' ;;
@@ -545,51 +524,16 @@ for m in "$cwork/.agent-runs"/*/messages.json; do
 done
 if [ -n "$cmpmsg" ] \
   && ! grep -q 'XXXXXXXXXX' "$cmpmsg" \
-  && grep -qE 'old tool output cleared|CONTEXT COMPACTION|Active Task' "$cmpmsg"; then
+  && grep -q 'old tool output cleared' "$cmpmsg" \
+  && ! grep -q 'CONTEXT COMPACTION' "$cmpmsg"; then
   printf 'ok   compact prunes old tool output\n'
 else
   printf 'FAIL compact prunes old tool output\n'; fail=$((fail + 1))
 fi
-if grep -q 'compact:' "$d/cmp.err"; then
+if grep -q 'compact: pruned' "$d/cmp.err"; then
   printf 'ok   compact prints machine line\n'
 else
   printf 'FAIL compact prints machine line\n'; fail=$((fail + 1))
-fi
-# compact.sh: summary request keeps fat-tool head facts; messages still prune
-ccdir=$d/ccfacts
-mkdir -p "$ccdir/hooks"
-awk 'BEGIN{
-  printf "MARKER_ALPHA=ORANGE-MANGO-7\n"
-  for(i=0;i<400;i++) printf "lorem-payload-for-context-pressure %03d\n", i
-  printf "block alpha 1399 lorem-payload-for-context-pressure\n"
-}' > "$ccdir/fatbody.txt"
-jq -n --rawfile fat "$ccdir/fatbody.txt" '
-  [
-    {role:"system",content:"sys"},
-    {role:"user",content:"cat the files"},
-    {role:"assistant",content:"",tool_calls:[{id:"t1",function:{name:"shell",arguments:"{\"command\":\"cat alpha.txt\"}"}}]},
-    {role:"tool",content:$fat},
-    {role:"assistant",content:"",tool_calls:[{id:"t2",function:{name:"shell",arguments:"{\"command\":\"echo x\"}"}}]},
-    {role:"tool",content:"x"},
-    {role:"assistant",content:"",tool_calls:[{id:"t3",function:{name:"shell",arguments:"{\"command\":\"echo y\"}"}}]},
-    {role:"tool",content:"y"}
-  ]
-' > "$ccdir/messages.json"
-SLAB_MESSAGES=$ccdir/messages.json \
-SLAB_HOOK_WORK=$ccdir/hooks \
-SLAB_COMPACT_FORCE=1 \
-SLAB_CONTEXT_WINDOW=128000 \
-  /bin/sh "$ROOT/plugins/agent/compact.sh" > "$ccdir/out" 2> "$ccdir/err" || true
-if [ -f "$ccdir/hooks/complete-request.json" ] \
-  && jq -e '.user | test("ORANGE-MANGO-7")' "$ccdir/hooks/complete-request.json" >/dev/null 2>&1 \
-  && jq -e '.user | test("block alpha 1399")' "$ccdir/hooks/complete-request.json" >/dev/null 2>&1 \
-  && jq -e '.system | test("verbatim")' "$ccdir/hooks/complete-request.json" >/dev/null 2>&1 \
-  && grep -q 'old tool output cleared' "$ccdir/messages.json" \
-  && ! grep -q 'ORANGE-MANGO-7' "$ccdir/messages.json" \
-  && grep -q 'compact: pruned' "$ccdir/err"; then
-  printf 'ok   compact summary request keeps tool facts\n'
-else
-  printf 'FAIL compact summary request keeps tool facts\n'; fail=$((fail + 1))
 fi
 rm -rf "$cwd/agent-store"
 # detach: engine is bin/agent, sibling seed.sh can go
@@ -941,69 +885,13 @@ EOF
   fi
   ck "init cached catalog" test -f "$cwd/agent-store/catalog.json"
   ck "init cached init plugin" test -f "$cwd/agent-store/plugins/init.json"
-  ck "init cached host script" test -f "$cwd/agent-store/plugins/host.sh"
-  ck "init cached compact script" test -f "$cwd/agent-store/plugins/compact.sh"
+  ck "init did not cache host script" test ! -f "$cwd/agent-store/plugins/host.sh"
+  ck "init did not cache compact script" test ! -f "$cwd/agent-store/plugins/compact.sh"
   ck "init wrote memory tree" test -f "$cwd/.agent-memory/index.json"
-  if jq -e '.host | type=="object" and has("ok") and has("kind") and has("user")' \
-    "$cwd/agent-store/index.json" >/dev/null 2>&1; then
-    printf 'ok   init wrote host map\n'
+  if jq -e 'has("host") | not' "$cwd/agent-store/index.json" >/dev/null 2>&1; then
+    printf 'ok   init tree has no host map\n'
   else
-    printf 'FAIL init wrote host map\n'; fail=$((fail + 1))
-  fi
-
-  # fake HOME: host_inventory records one-level dirs and a git project
-  hdir=$d/hostinv
-  mkdir -p "$hdir/bin" \
-    "$hdir/home/Docs" "$hdir/home/.claude" "$hdir/home/.Trash" \
-    "$hdir/home/leehow/code/demo/.git"
-  cp "$cwd/.env" "$hdir/.env"
-  cp "$cwd/bin/agent" "$hdir/bin/agent"
-  chmod 755 "$hdir/bin/agent"
-  cat > "$hdir/fill-tree.sh" <<'SH'
-#!/bin/sh
-jq '.ready=true
-  | .updated="t"
-  | .system.tools.sh.present=true | .system.tools.sh.ok=true
-  | .system.tools.curl.present=true | .system.tools.curl.ok=true
-  | .system.tools.jq.present=true | .system.tools.jq.ok=true
-  | .system.tools.rg.present=true | .system.tools.rg.ok=true
-  | .system.tools.git.present=true | .system.tools.git.ok=true
-  | .system.tools.python.present=true | .system.tools.python.ok=true' \
-  agent-store/index.json > agent-store/index.json.tmp
-mv agent-store/index.json.tmp agent-store/index.json
-SH
-  chmod 755 "$hdir/fill-tree.sh"
-  cat > "$stub" <<'EOF'
-#!/bin/sh
-n=$(cat "${STUB_N}" 2>/dev/null || echo 0); n=$((n + 1)); printf '%s\n' "$n" > "${STUB_N}"
-if [ "$n" -eq 1 ]; then
-  printf '%s\n' '{"content":"","tool_calls":[{"id":"h1","name":"shell","arguments":"{\"command\":\"sh fill-tree.sh\"}"}],"usage":{"prompt_tokens":1,"completion_tokens":1}}'
-else
-  printf '%s\n' '{"content":"hostinited","tool_calls":[],"usage":{"prompt_tokens":1,"completion_tokens":1}}'
-fi
-EOF
-  printf '0\n' > "$STUB_N"
-  (
-    cd "$hdir"
-    HOME=$hdir/home SEED_PLUGIN_ROOT=$PROOT SEED_LLM_STUB=$stub STUB_N=$STUB_N \
-      "$hdir/bin/agent" </dev/null
-  ) > "$d/host.out" 2> "$d/host.err" || true
-  if jq -e --arg home "$hdir/home" \
-      '.host.ok==true
-       and .host.home==$home
-       and (.host.home_top|index("Docs"))
-       and (.host.home_top|index(".claude"))
-       and ((.host.home_top|index(".Trash"))|not)
-       and (.host.projects|map(.name)|index("demo"))' \
-    "$hdir/agent-store/index.json" >/dev/null 2>&1; then
-    printf 'ok   host inventory maps fake home\n'
-  else
-    printf 'FAIL host inventory maps fake home\n'; fail=$((fail + 1))
-  fi
-  if grep -q '>' "$d/host.err" && ! grep -q 'error: init failed' "$d/host.err"; then
-    printf 'ok   host inventory does not block ready\n'
-  else
-    printf 'FAIL host inventory does not block ready\n'; fail=$((fail + 1))
+    printf 'FAIL init tree has no host map\n'; fail=$((fail + 1))
   fi
 
   # already ready: dead plugin root still opens
@@ -1032,12 +920,6 @@ EOF
       "$ROOT/plugins/agent/init.json" > "$up/agent/init.json"
   else
     printf '%s\n' '{"prompt":"updated-init-prompt","machine_tree":{},"memory_tree":{}}' > "$up/agent/init.json"
-  fi
-  if [ -f "$ROOT/plugins/agent/host.sh" ]; then
-    cp "$ROOT/plugins/agent/host.sh" "$up/agent/host.sh"
-  fi
-  if [ -f "$ROOT/plugins/agent/compact.sh" ]; then
-    cp "$ROOT/plugins/agent/compact.sh" "$up/agent/compact.sh"
   fi
   kill "$PLUGIN_PID" 2>/dev/null || true
   PLUGIN_PID=
@@ -1096,7 +978,7 @@ EOF
   fi
 
   # model wrote ready + skills at the top level, dropped version/ours:
-  # host must salvage, not print init failed
+  # engine must salvage, not print init failed
   crook=$d/crook
   mkdir -p "$crook/bin"
   cp "$cwd/.env" "$crook/.env"
@@ -1145,9 +1027,9 @@ EOF
       and (.system.skills|type=="array")
       and (.system.skills|map(.name)|index("pdf-demo"))' \
     "$crook/agent-store/index.json" >/dev/null 2>&1; then
-    printf 'ok   host salvages top-level skills\n'
+    printf 'ok   engine salvages top-level skills\n'
   else
-    printf 'FAIL host salvages top-level skills\n'; fail=$((fail + 1))
+    printf 'FAIL engine salvages top-level skills\n'; fail=$((fail + 1))
   fi
 
   # already-ready but crooked: repair on open, do not re-init

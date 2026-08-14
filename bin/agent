@@ -508,6 +508,10 @@ strip_msg_thinking() {
   jq 'map(if type=="object" then del(.reasoning_content, .reasoning, .thinking) else . end)' "$1" > "$2"
 }
 
+llm_context_overflow() {
+  grep -qiE 'context_length|context length|too many tokens|maximum context|prompt is too long|prompt_too_long' "$1" 2>/dev/null
+}
+
 model_turn() {
   in_msgs=$1
   dest=$2
@@ -551,6 +555,14 @@ model_turn() {
   case $code in
     2*) : ;;
     401|403) rm -rf "$work"; die "llm: API key rejected (HTTP $code)" 77 ;;
+    400|413)
+      if llm_context_overflow "$work/raw"; then
+        rm -rf "$work"
+        return 73
+      fi
+      rm -rf "$work"
+      die "llm: HTTP $code" 72
+      ;;
     *) rm -rf "$work"; die "llm: HTTP ${code:-000}" 72 ;;
   esac
   if [ "$stream" = true ]; then
@@ -582,6 +594,83 @@ llm_main() {
   fi
   model_turn "$work/m.json" "$work/t.json"
   jq -r '.content // empty' "$work/t.json"
+}
+
+# Clear old fat tool bodies when prompt_tokens cross 70% of the window.
+# Protect SYSTEM. If there are at least two user turns, keep from the
+# second-to-last user; else keep from the second-to-last tool-call assistant.
+agent_compact() {
+  ac_msgs=$1
+  ac_tok=$2
+  ac_force=${3:-0}
+  [ "${INIT_STOP_WHEN_READY:-}" = 1 ] && return 0
+  [ -f "$ac_msgs" ] || return 0
+  case $ac_tok in
+    ''|*[!0-9]*) ac_tok=0 ;;
+  esac
+  case $ac_force in
+    1) : ;;
+    *) ac_force=0 ;;
+  esac
+  ac_win=128000
+  if [ -n "${INSTALL:-}" ] && [ -f "$INSTALL/agent-store/catalog.json" ]; then
+    ac_cw=$(jq -r '.context_window // empty' "$INSTALL/agent-store/catalog.json" 2>/dev/null || true)
+    case $ac_cw in
+      ''|*[!0-9]*) : ;;
+      *) ac_win=$ac_cw ;;
+    esac
+  fi
+  [ -n "${LLM_CONTEXT_WINDOW:-}" ] && ac_win=$LLM_CONTEXT_WINDOW
+  [ -n "${SLAB_CONTEXT_WINDOW:-}" ] && ac_win=$SLAB_CONTEXT_WINDOW
+  case $ac_win in
+    ''|*[!0-9]*) ac_win=128000 ;;
+  esac
+  ac_th=$((ac_win * 70 / 100))
+  if [ "$ac_force" -ne 1 ] && [ "$ac_tok" -lt "$ac_th" ]; then
+    return 0
+  fi
+  ac_protect=$(jq '
+    def users: [to_entries[] | select(.value.role=="user") | .key];
+    def groups: [to_entries[] | select(
+        .value.role=="assistant"
+        and ((.value.tool_calls // []) | length) > 0
+      ) | .key];
+    if (users | length) >= 2 then users[-2]
+    elif (groups | length) >= 2 then groups[-2]
+    else -1
+    end
+  ' "$ac_msgs" 2>/dev/null || echo -1)
+  case $ac_protect in
+    ''|*[!0-9-]*|-1) return 0 ;;
+  esac
+  [ "$ac_protect" -gt 0 ] || return 0
+  ac_need=$(jq -r --argjson p "$ac_protect" '
+    any(.[1:$p][];
+      .role=="tool"
+      and ((.content // "") | type=="string")
+      and ((.content // "") | length) > 200)
+  ' "$ac_msgs" 2>/dev/null || echo false)
+  [ "$ac_need" = true ] || return 0
+  ac_tmp=$(mktemp "${TMPDIR:-/tmp}/seed-cc.XXXXXX")
+  if jq --argjson p "$ac_protect" '
+    . as $m
+    | [
+        range(0; $m|length) as $i
+        | $m[$i]
+        | if ($i > 0) and ($i < $p) and (.role=="tool")
+            and ((.content // "") | type=="string")
+            and ((.content // "") | length) > 200
+          then .content = "[old tool output cleared]"
+          else .
+          end
+      ]
+  ' "$ac_msgs" > "$ac_tmp"
+  then
+    mv "$ac_tmp" "$ac_msgs"
+    printf 'compact: pruned\n' >&2
+  else
+    rm -f "$ac_tmp"
+  fi
 }
 
 tool_note() {
@@ -638,10 +727,45 @@ run_loop() {
     jq -n --arg s "$system" --arg u "$user" \
       '[{role:"system",content:$s},{role:"user",content:$u}]' > "$msgs"
   fi
+  last_pt=0
+  if [ -n "${INSTALL:-}" ] && [ -f "$INSTALL/agent-store/last-prompt-tokens" ]; then
+    last_pt=$(cat "$INSTALL/agent-store/last-prompt-tokens" 2>/dev/null || echo 0)
+  fi
+  case $last_pt in
+    ''|*[!0-9]*) last_pt=0 ;;
+  esac
+  agent_compact "$msgs" "$last_pt" || true
   round=1
   final=
   while [ "$round" -le "$max" ]; do
+    set +e
     model_turn "$msgs" "$evdir/turn-$round.json"
+    mt=$?
+    set -e
+    if [ "$mt" -eq 73 ]; then
+      if [ -f "$evdir/overflow-retried" ]; then
+        die "llm: context overflow" 73
+      fi
+      touch "$evdir/overflow-retried"
+      agent_compact "$msgs" "$last_pt" 1 || true
+      set +e
+      model_turn "$msgs" "$evdir/turn-$round.json"
+      mt=$?
+      set -e
+    fi
+    if [ "$mt" -ne 0 ]; then
+      return "$mt"
+    fi
+    last_pt=$(jq -r '.usage.prompt_tokens // .usage.input_tokens // 0' \
+      "$evdir/turn-$round.json" 2>/dev/null || echo 0)
+    case $last_pt in
+      ''|*[!0-9]*) last_pt=0 ;;
+    esac
+    if [ -n "${INSTALL:-}" ]; then
+      mkdir -p "$INSTALL/agent-store"
+      printf '%s\n' "$last_pt" > "$INSTALL/agent-store/last-prompt-tokens"
+    fi
+    agent_compact "$msgs" "$last_pt" || true
     content=$(jq -r '.content // empty' "$evdir/turn-$round.json")
     ntools=$(jq '.tool_calls | length' "$evdir/turn-$round.json")
     if [ "$ntools" -gt 0 ]; then
@@ -811,6 +935,7 @@ product_system() {
     "$INSTALL/agent-store/index.json" \
     "$PWD/.agent-memory/index.json"
   skill_catalog
+  agent_run_hooks system
 }
 
 agent_plugin_get() {
@@ -826,6 +951,63 @@ agent_plugin_get() {
     2*) cat "$body"; rm -f "$body" ;;
     *) rm -f "$body"; die "agent plugin: HTTP $code" 72 ;;
   esac
+}
+
+# Best-effort GET into dest. 404 / network fail: leave dest, return 1.
+agent_plugin_try() {
+  url=$1
+  dest=$2
+  need curl
+  body=$(mktemp "${TMPDIR:-/tmp}/seed-aptry.XXXXXX")
+  set +e
+  code=$(curl -q -sS --connect-timeout 5 --max-time 30 -o "$body" -w '%{http_code}' "$url")
+  cs=$?
+  set -e
+  if [ "$cs" -eq 0 ]; then
+    case $code in
+      2*) mv "$body" "$dest"; return 0 ;;
+    esac
+  fi
+  rm -f "$body"
+  return 1
+}
+
+agent_fetch_hooks() {
+  store=$INSTALL/agent-store
+  catf=$store/catalog.json
+  [ -f "$catf" ] || return 0
+  mkdir -p "$store/plugins"
+  root=$(plugin_root)
+  jq -r '.hooks | .. | strings' "$catf" 2>/dev/null | sort -u | while IFS= read -r rel; do
+    [ -n "$rel" ] || continue
+    case $rel in
+      *.sh) ;;
+      *) continue ;;
+    esac
+    case $rel in
+      *..*|/*) continue ;;
+    esac
+    dest=$store/plugins/$(basename "$rel")
+    agent_plugin_try "$(plugin_join "$root/agent" "$rel")" "$dest" || true
+  done
+}
+
+agent_run_hooks() {
+  phase=$1
+  store=$INSTALL/agent-store
+  catf=$store/catalog.json
+  [ -f "$catf" ] || return 0
+  SLAB_MACHINE_INDEX=$store/index.json
+  export SLAB_MACHINE_INDEX
+  jq -r --arg p "$phase" '.hooks[$p][]? // empty' "$catf" 2>/dev/null | while IFS= read -r rel; do
+    [ -n "$rel" ] || continue
+    script=$store/plugins/$(basename "$rel")
+    [ -f "$script" ] || continue
+    case $phase in
+      system) /bin/sh "$script" blurb || true ;;
+      *) /bin/sh "$script" || true ;;
+    esac
+  done
 }
 
 agent_ready() {
@@ -902,6 +1084,7 @@ agent_fetch_required() {
   store=$INSTALL/agent-store
   mkdir -p "$store/plugins"
   if [ -f "$store/catalog.json" ] && [ -f "$store/plugins/init.json" ]; then
+    agent_fetch_hooks
     return 0
   fi
   root=$(plugin_root)
@@ -918,6 +1101,7 @@ agent_fetch_required() {
   printf '%s\n' "$index" > "$tmp"
   printf '%s\n' "$body" > "$store/plugins/init.json"
   mv "$tmp" "$store/catalog.json"
+  agent_fetch_hooks
 }
 
 agent_place_trees() {
@@ -962,7 +1146,10 @@ agent_run_init() {
 agent_ensure_init() {
   [ "${SLAB_SKIP_INIT:-}" = 1 ] && return 0
   agent_repair_machine_tree || true
-  agent_check_machine_tree && return 0
+  if agent_check_machine_tree; then
+    agent_run_hooks after_ready
+    return 0
+  fi
   printf 'initializing:\n' >&2
   agent_fetch_required
   agent_place_trees
@@ -971,6 +1158,7 @@ agent_ensure_init() {
   export SEED_STREAM SEED_STREAM_PRINT
   agent_run_init
   agent_repair_machine_tree || true
+  agent_run_hooks after_ready
   agent_check_machine_tree || die "init failed" 76
   printf 'ready\n' >&2
 }
@@ -1003,6 +1191,7 @@ agent_update() {
   printf '%s\n' "$body" > "$tmpi"
   mv "$tmpi" "$store/plugins/init.json"
   mv "$tmpc" "$store/catalog.json"
+  agent_fetch_hooks
   if [ -f "$store/index.json" ]; then
     nr=$(jq -r '.machine_tree.system.retrieve // empty' "$store/plugins/init.json")
     if [ -n "$nr" ]; then

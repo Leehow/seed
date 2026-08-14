@@ -1,4 +1,79 @@
-agent_after_turn() { :; }
+# Clear old fat tool bodies when prompt_tokens cross 70% of the window.
+# Protect SYSTEM. If there are at least two user turns, keep from the
+# second-to-last user; else keep from the second-to-last tool-call assistant.
+agent_compact() {
+  ac_msgs=$1
+  ac_tok=$2
+  ac_force=${3:-0}
+  [ "${INIT_STOP_WHEN_READY:-}" = 1 ] && return 0
+  [ -f "$ac_msgs" ] || return 0
+  case $ac_tok in
+    ''|*[!0-9]*) ac_tok=0 ;;
+  esac
+  case $ac_force in
+    1) : ;;
+    *) ac_force=0 ;;
+  esac
+  ac_win=128000
+  if [ -n "${INSTALL:-}" ] && [ -f "$INSTALL/agent-store/catalog.json" ]; then
+    ac_cw=$(jq -r '.context_window // empty' "$INSTALL/agent-store/catalog.json" 2>/dev/null || true)
+    case $ac_cw in
+      ''|*[!0-9]*) : ;;
+      *) ac_win=$ac_cw ;;
+    esac
+  fi
+  [ -n "${LLM_CONTEXT_WINDOW:-}" ] && ac_win=$LLM_CONTEXT_WINDOW
+  [ -n "${SLAB_CONTEXT_WINDOW:-}" ] && ac_win=$SLAB_CONTEXT_WINDOW
+  case $ac_win in
+    ''|*[!0-9]*) ac_win=128000 ;;
+  esac
+  ac_th=$((ac_win * 70 / 100))
+  if [ "$ac_force" -ne 1 ] && [ "$ac_tok" -lt "$ac_th" ]; then
+    return 0
+  fi
+  ac_protect=$(jq '
+    def users: [to_entries[] | select(.value.role=="user") | .key];
+    def groups: [to_entries[] | select(
+        .value.role=="assistant"
+        and ((.value.tool_calls // []) | length) > 0
+      ) | .key];
+    if (users | length) >= 2 then users[-2]
+    elif (groups | length) >= 2 then groups[-2]
+    else -1
+    end
+  ' "$ac_msgs" 2>/dev/null || echo -1)
+  case $ac_protect in
+    ''|*[!0-9-]*|-1) return 0 ;;
+  esac
+  [ "$ac_protect" -gt 0 ] || return 0
+  ac_need=$(jq -r --argjson p "$ac_protect" '
+    any(.[1:$p][];
+      .role=="tool"
+      and ((.content // "") | type=="string")
+      and ((.content // "") | length) > 200)
+  ' "$ac_msgs" 2>/dev/null || echo false)
+  [ "$ac_need" = true ] || return 0
+  ac_tmp=$(mktemp "${TMPDIR:-/tmp}/seed-cc.XXXXXX")
+  if jq --argjson p "$ac_protect" '
+    . as $m
+    | [
+        range(0; $m|length) as $i
+        | $m[$i]
+        | if ($i > 0) and ($i < $p) and (.role=="tool")
+            and ((.content // "") | type=="string")
+            and ((.content // "") | length) > 200
+          then .content = "[old tool output cleared]"
+          else .
+          end
+      ]
+  ' "$ac_msgs" > "$ac_tmp"
+  then
+    mv "$ac_tmp" "$ac_msgs"
+    printf 'compact: pruned\n' >&2
+  else
+    rm -f "$ac_tmp"
+  fi
+}
 
 tool_note() {
   name=$1
@@ -61,7 +136,7 @@ run_loop() {
   case $last_pt in
     ''|*[!0-9]*) last_pt=0 ;;
   esac
-  agent_after_turn "$msgs" "$last_pt" "$evdir" || true
+  agent_compact "$msgs" "$last_pt" || true
   round=1
   final=
   while [ "$round" -le "$max" ]; do
@@ -74,10 +149,7 @@ run_loop() {
         die "llm: context overflow" 73
       fi
       touch "$evdir/overflow-retried"
-      SLAB_COMPACT_FORCE=1
-      export SLAB_COMPACT_FORCE
-      agent_after_turn "$msgs" "$last_pt" "$evdir" || true
-      unset SLAB_COMPACT_FORCE
+      agent_compact "$msgs" "$last_pt" 1 || true
       set +e
       model_turn "$msgs" "$evdir/turn-$round.json"
       mt=$?
@@ -95,7 +167,7 @@ run_loop() {
       mkdir -p "$INSTALL/agent-store"
       printf '%s\n' "$last_pt" > "$INSTALL/agent-store/last-prompt-tokens"
     fi
-    agent_after_turn "$msgs" "$last_pt" "$evdir" || true
+    agent_compact "$msgs" "$last_pt" || true
     content=$(jq -r '.content // empty' "$evdir/turn-$round.json")
     ntools=$(jq '.tool_calls | length' "$evdir/turn-$round.json")
     if [ "$ntools" -gt 0 ]; then

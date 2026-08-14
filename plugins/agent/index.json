@@ -1,14 +1,10 @@
 {
-  "version": "15",
-  "updated": "2026-08-14T16:30:00Z",
+  "version": "17",
+  "updated": "2026-08-14T16:58:00Z",
   "required": {
     "init": "init.json"
   },
   "optional": {},
   "context_window": 128000,
-  "hooks": {
-    "after_ready": ["host.sh"],
-    "system": ["host.sh"],
-    "after_turn": ["compact.sh"]
-  }
+  "hooks": {}
 }

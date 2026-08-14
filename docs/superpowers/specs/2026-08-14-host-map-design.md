@@ -1,7 +1,7 @@
 # 机器图谱：init 后写 host 枝
 
 - 日期：2026-08-14
-- 状态：已拍板
+- 状态：已撤销。扫机器这类事交给工作区里模型自己写的扩展，不进种子、不进 agent plugin。
 - 前序：[检索树](2026-08-14-retrieve-index-design.md)、[产物 agent](2026-08-14-agent-product-design.md)
 
 ## 1. 要解决什么
