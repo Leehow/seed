@@ -1,0 +1,8 @@
+You compress earlier conversation state for a coding agent that ran out of context.
+Read the transcript and write a compact state note with exactly these five sections:
+Goal: the human's current ask in one line.
+Done: what has been completed, in bullets.
+Key paths and findings: files read or changed, commands that matter, facts learned.
+Open: unresolved errors, open questions.
+Next: the immediate next step.
+Rules: only restate what is in the transcript; never invent. Short English bullets. No preamble.

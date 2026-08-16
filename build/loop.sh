@@ -1,6 +1,8 @@
-# Clear old fat tool bodies when prompt_tokens cross 70% of the window.
-# Protect SYSTEM. If there are at least two user turns, keep from the
-# second-to-last user; else keep from the second-to-last tool-call assistant.
+# When prompt_tokens cross 70% of the window: first summarize the
+# unprotected span into one user message (best effort, one small call),
+# then clear old fat tool bodies. Protect SYSTEM. If there are at least
+# two user turns, keep from the second-to-last user; else keep from the
+# second-to-last tool-call assistant.
 agent_compact() {
   ac_msgs=$1
   ac_tok=$2
@@ -53,8 +55,10 @@ agent_compact() {
       and ((.content // "") | length) > 200)
   ' "$ac_msgs" 2>/dev/null || echo false)
   [ "$ac_need" = true ] || return 0
+  ac_sum=
+  ac_sum=$(agent_summarize "$ac_msgs" "$ac_protect" 2>/dev/null) || ac_sum=
   ac_tmp=$(mktemp "${TMPDIR:-/tmp}/seed-cc.XXXXXX")
-  if jq --argjson p "$ac_protect" '
+  if jq --argjson p "$ac_protect" --arg s "$ac_sum" '
     . as $m
     | [
         range(0; $m|length) as $i
@@ -65,14 +69,65 @@ agent_compact() {
           then .content = "[old tool output cleared]"
           else .
           end
-      ]
+      ] as $c
+    | if $s == "" then $c
+      else $c[0:$p] + [{role:"user", content:("[earlier work summary]\n" + $s)}] + $c[$p:]
+      end
   ' "$ac_msgs" > "$ac_tmp"
   then
     mv "$ac_tmp" "$ac_msgs"
-    printf 'compact: pruned\n' >&2
+    if [ -n "$ac_sum" ]; then
+      printf 'compact: summarized\n' >&2
+    else
+      printf 'compact: pruned\n' >&2
+    fi
   else
     rm -f "$ac_tmp"
   fi
+}
+
+# Best-effort summary of the span that is about to be pruned. Prints the
+# summary text on stdout; returns nonzero on any failure so the caller
+# falls back to plain clearing. Runs one small non-streaming call outside
+# the loop, never touches messages itself.
+agent_summarize() {
+  as_msgs=$1
+  as_p=$2
+  [ -f "$as_msgs" ] || return 1
+  case $as_p in
+    ''|*[!0-9]*) return 1 ;;
+  esac
+  [ "$as_p" -gt 1 ] || return 1
+  as_tr=$(jq -r --argjson p "$as_p" '
+    .[1:$p]
+    | map(
+        (.role // "?") as $r
+        | (if $r == "assistant" and ((.tool_calls // []) | length) > 0
+           then " [calls " + ([.tool_calls[].function.name // empty] | join(",")) + "]"
+           else "" end) as $calls
+        | $r + ": " + ((.content // "") | if type == "string" then . else tostring end) + $calls
+      )
+    | map(.[0:500])
+    | join("\n")
+    | .[0:12288]
+  ' "$as_msgs" 2>/dev/null) || return 1
+  [ -n "$as_tr" ] || return 1
+  as_dir=$(mktemp -d "${TMPDIR:-/tmp}/seed-sum.XXXXXX")
+  jq -n --arg s "$(cabin_compact_summary)" --arg t "$as_tr" \
+    '[{role:"system",content:$s},{role:"user",content:$t}]' > "$as_dir/msgs.json"
+  as_st=0
+  (
+    SEED_STREAM=0
+    SEED_STREAM_PRINT=0
+    model_turn "$as_dir/msgs.json" "$as_dir/out.json"
+  ) || as_st=$?
+  as_out=
+  if [ "$as_st" -eq 0 ]; then
+    as_out=$(jq -r '.content // empty | .[0:4096]' "$as_dir/out.json" 2>/dev/null || true)
+  fi
+  rm -rf "$as_dir"
+  [ -n "$as_out" ] || return 1
+  printf '%s' "$as_out"
 }
 
 tool_note() {

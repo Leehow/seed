@@ -31,6 +31,18 @@ skill_catalog() {
   ' "$scf" 2>/dev/null || true
 }
 
+# Two lines of ready state from the Machine index so plain tasks do not
+# burn a round on jq-reading it: the edition choice and which tools are ok.
+agent_state_lines() {
+  sf=$INSTALL/agent-store/index.json
+  [ -f "$sf" ] || return 0
+  jq -r '
+    "Edition: " + (.ours.edition // "unset"),
+    "Tools ok: " + ([.system.tools // {} | to_entries[]
+      | select(.value.ok == true) | .key] | join(" "))
+  ' "$sf" 2>/dev/null || true
+}
+
 product_system() {
   printf '%s\nModel: %s (%s)\nMachine index: %s\nProject memory: %s\n' \
     "$(cabin_product_system)" \
@@ -38,41 +50,31 @@ product_system() {
     "${LLM_PROVIDER:-unknown}" \
     "$INSTALL/agent-store/index.json" \
     "$PWD/.agent-memory/index.json"
+  agent_state_lines
   skill_catalog
   agent_run_hooks system
 }
 
 agent_plugin_get() {
-  url=$1
-  need curl
-  body=$(mktemp "${TMPDIR:-/tmp}/seed-aplg.XXXXXX")
-  set +e
-  code=$(curl -q -sS --connect-timeout 5 --max-time 30 -o "$body" -w '%{http_code}' "$url")
-  cs=$?
-  set -e
-  [ "$cs" -eq 0 ] || { rm -f "$body"; die "agent plugin: network failed (curl=$cs)" 71; }
-  case $code in
-    2*) cat "$body"; rm -f "$body" ;;
-    *) rm -f "$body"; die "agent plugin: HTTP $code" 72 ;;
-  esac
+  ap_body=$(mktemp "${TMPDIR:-/tmp}/seed-aplg.XXXXXX")
+  if http_get "$1" "$ap_body"; then
+    cat "$ap_body"
+    rm -f "$ap_body"
+    return 0
+  fi
+  rm -f "$ap_body"
+  [ "$HTTP_CURL" -eq 0 ] || die "agent plugin: network failed (curl=$HTTP_CURL)" 71
+  die "agent plugin: HTTP $HTTP_CODE" 72
 }
 
 # Best-effort GET into dest. 404 / network fail: leave dest, return 1.
 agent_plugin_try() {
-  url=$1
-  dest=$2
-  need curl
-  body=$(mktemp "${TMPDIR:-/tmp}/seed-aptry.XXXXXX")
-  set +e
-  code=$(curl -q -sS --connect-timeout 5 --max-time 30 -o "$body" -w '%{http_code}' "$url")
-  cs=$?
-  set -e
-  if [ "$cs" -eq 0 ]; then
-    case $code in
-      2*) mv "$body" "$dest"; return 0 ;;
-    esac
+  at_body=$(mktemp "${TMPDIR:-/tmp}/seed-aptry.XXXXXX")
+  if http_get "$1" "$at_body"; then
+    mv "$at_body" "$2"
+    return 0
   fi
-  rm -f "$body"
+  rm -f "$at_body"
   return 1
 }
 
@@ -112,6 +114,20 @@ agent_run_hooks() {
       *) /bin/sh "$script" || true ;;
     esac
   done
+}
+
+# Print the plugin's ask text once the tree is ready and edition is still
+# unset. The wording lives in the init pack so the seed stays ASCII and
+# does not name any expansion.
+agent_print_ask() {
+  idx=$INSTALL/agent-store/index.json
+  pack=$INSTALL/agent-store/plugins/init.json
+  [ -f "$idx" ] && [ -f "$pack" ] || return 0
+  ed=$(jq -r '.ours.edition // empty' "$idx" 2>/dev/null || true)
+  [ -z "$ed" ] || return 0
+  ask=$(jq -r '.ask // empty' "$pack" 2>/dev/null || true)
+  [ -n "$ask" ] || return 0
+  printf '%s\n' "$ask" >&2
 }
 
 agent_ready() {
@@ -184,6 +200,34 @@ agent_check_machine_tree() {
   ' "$f" >/dev/null 2>&1
 }
 
+# Shared fetch: take a catalog body, pull required.init, write both under
+# agent-store. strict=1 demands the full init pack shape (first fetch).
+agent_fetch_pack() {
+  fp_strict=$1
+  fp_index=$2
+  store=$INSTALL/agent-store
+  mkdir -p "$store/plugins"
+  root=$(plugin_root)
+  rel=$(printf '%s' "$fp_index" | jq -r '.required.init // empty')
+  [ -n "$rel" ] || die "agent plugin: catalog has no required.init" 69
+  body=$(agent_plugin_get "$(plugin_join "$root/agent" "$rel")")
+  if [ "$fp_strict" -eq 1 ]; then
+    printf '%s' "$body" | jq -e \
+      'type == "object" and has("prompt") and has("machine_tree") and has("memory_tree")' \
+      >/dev/null 2>&1 || die "agent plugin: init pack invalid" 69
+  else
+    printf '%s' "$body" | jq -e 'has("prompt")' >/dev/null 2>&1 \
+      || die "agent plugin: init pack invalid" 69
+  fi
+  tmpc=$(mktemp "${TMPDIR:-/tmp}/seed-acat.XXXXXX")
+  tmpi=$(mktemp "${TMPDIR:-/tmp}/seed-ainit.XXXXXX")
+  printf '%s\n' "$fp_index" > "$tmpc"
+  printf '%s\n' "$body" > "$tmpi"
+  mv "$tmpi" "$store/plugins/init.json"
+  mv "$tmpc" "$store/catalog.json"
+  agent_fetch_hooks
+}
+
 agent_fetch_required() {
   store=$INSTALL/agent-store
   mkdir -p "$store/plugins"
@@ -195,17 +239,7 @@ agent_fetch_required() {
   index=$(agent_plugin_get "$root/agent/index.json")
   printf '%s' "$index" | jq -e 'type == "object"' >/dev/null 2>&1 \
     || die "agent plugin: catalog is not JSON" 69
-  rel=$(printf '%s' "$index" | jq -r '.required.init // empty')
-  [ -n "$rel" ] || die "agent plugin: catalog has no required.init" 69
-  body=$(agent_plugin_get "$(plugin_join "$root/agent" "$rel")")
-  printf '%s' "$body" | jq -e \
-    'type == "object" and has("prompt") and has("machine_tree") and has("memory_tree")' \
-    >/dev/null 2>&1 || die "agent plugin: init pack invalid" 69
-  tmp=$(mktemp "${TMPDIR:-/tmp}/seed-acat.XXXXXX")
-  printf '%s\n' "$index" > "$tmp"
-  printf '%s\n' "$body" > "$store/plugins/init.json"
-  mv "$tmp" "$store/catalog.json"
-  agent_fetch_hooks
+  agent_fetch_pack 1 "$index"
 }
 
 agent_place_trees() {
@@ -226,6 +260,52 @@ agent_place_trees() {
   fi
 }
 
+# Deterministic probe: the engine, not the model, fills system.tools
+# (command -v for the path, a cheap smoke for ok). The init conversation
+# only handles the fuzzy rest: web smoke, skills scan, ready flip.
+agent_probe_one() {
+  pt=$1
+  pb=$(command -v "$pt" 2>/dev/null || true)
+  if [ -z "$pb" ]; then
+    jq -nc '{present:false,path:"",ok:false,note:"not found"}'
+    return 0
+  fi
+  pok=false
+  case $pt in
+    sh) "$pb" -c 'echo sh_ok' >/dev/null 2>&1 && pok=true ;;
+    jq) "$pb" -n . >/dev/null 2>&1 && pok=true ;;
+    *) "$pb" --version >/dev/null 2>&1 && pok=true ;;
+  esac
+  jq -nc --arg p "$pb" --argjson ok "$pok" \
+    '{present:true,path:$p,ok:$ok,note:""}'
+}
+
+agent_probe_tools() {
+  f=$INSTALL/agent-store/index.json
+  [ -f "$f" ] || return 0
+  pj=$(mktemp "${TMPDIR:-/tmp}/seed-probe.XXXXXX")
+  {
+    printf '{'
+    sep=
+    for pt in sh curl jq rg git python; do
+      printf '%s"%s":%s' "$sep" "$pt" "$(agent_probe_one "$pt")"
+      sep=,
+    done
+    printf '}\n'
+  } > "$pj"
+  tmp=$(mktemp "${TMPDIR:-/tmp}/seed-probew.XXXXXX")
+  if jq --slurpfile t "$pj" '
+      if (.system? | type) == "object"
+      then .system.tools = $t[0]
+      else . end
+    ' "$f" > "$tmp" 2>/dev/null; then
+    mv "$tmp" "$f"
+  else
+    rm -f "$tmp"
+  fi
+  rm -f "$pj"
+}
+
 agent_run_init() {
   pack=$INSTALL/agent-store/plugins/init.json
   prompt=$(jq -r '.prompt // empty' "$pack")
@@ -234,13 +314,10 @@ agent_run_init() {
   sess=$ev/session
   mkdir -p "$ev"
   shell_init "$sess" "$PWD"
-  set +e
   INIT_STOP_WHEN_READY=1
   export INIT_STOP_WHEN_READY
-  run_loop "$(product_system)" "$prompt" "$sess" "$ev" "$AGENT_MAX_ROUNDS" 0
-  as=$?
+  run_loop "$(product_system)" "$prompt" "$sess" "$ev" "$AGENT_MAX_ROUNDS" 0 || :
   unset INIT_STOP_WHEN_READY
-  set -e
   shell_stop "$sess" 2>/dev/null || :
   agent_repair_machine_tree || true
   agent_check_machine_tree && return 0
@@ -257,6 +334,7 @@ agent_ensure_init() {
   printf 'initializing:\n' >&2
   agent_fetch_required
   agent_place_trees
+  agent_probe_tools
   SEED_STREAM=1
   SEED_STREAM_PRINT=1
   export SEED_STREAM SEED_STREAM_PRINT
@@ -284,18 +362,7 @@ agent_update() {
   if [ "$nv" = "$ov" ] && [ "$nu" = "$ou" ]; then
     return 0
   fi
-  rel=$(printf '%s' "$index" | jq -r '.required.init // empty')
-  [ -n "$rel" ] || die "agent plugin: catalog has no required.init" 69
-  body=$(agent_plugin_get "$(plugin_join "$root/agent" "$rel")")
-  printf '%s' "$body" | jq -e 'has("prompt")' >/dev/null 2>&1 \
-    || die "agent plugin: init pack invalid" 69
-  tmpc=$(mktemp "${TMPDIR:-/tmp}/seed-ucat.XXXXXX")
-  tmpi=$(mktemp "${TMPDIR:-/tmp}/seed-uinit.XXXXXX")
-  printf '%s\n' "$index" > "$tmpc"
-  printf '%s\n' "$body" > "$tmpi"
-  mv "$tmpi" "$store/plugins/init.json"
-  mv "$tmpc" "$store/catalog.json"
-  agent_fetch_hooks
+  agent_fetch_pack 0 "$index"
   if [ -f "$store/index.json" ]; then
     nr=$(jq -r '.machine_tree.system.retrieve // empty' "$store/plugins/init.json")
     if [ -n "$nr" ]; then

@@ -17,11 +17,11 @@ slab 是一个实验：**POSIX `/bin/sh` 能不能撑住一个带工具的 codin
 3. **工作区 = 启动 `bin/agent` 时的 `$PWD`。** 禁止把 `/Users/`、`/home/` 或任何本机绝对路径写进产物。
 4. **一份 POSIX 种子，跟宿主 `$SHELL` 走。** 不要为 Mac / Linux 维护两套，不要假设 Bash 5，不要用 `sed -i`、`head -c`、`pgrep`、`timeout(1)`。
 5. **外壳拥有循环。** 不要改成「每条任务让模型写一段 controller 再自己调 llm」。
-6. **种子对人零交互。** 安装不叫模型。状态和错误用英文机器话（`error:`、`installed:`）。产物第一次打开先 `initializing:`，就绪后才是 `>`，只显示用户输入和最后回答，没有开场白。
+6. **种子对人零交互。** 安装不叫模型。状态和错误用英文机器话（`error:`、`installed:`）。产物第一次打开先 `initializing:`，就绪后若尚未选择 edition，打印 plugin 的 `ask`（中文选项），再是 `>`。对话仍只显示用户输入和最后回答。
 7. **不信模型口头说装好了。** 种子自己看磁盘验收。安装只写文件、写 shim、验磁盘。
 8. **之后不限制语言。** 模型在工作区里写什么都行。那是产物在干活，不是外壳作弊。
 9. **增量开发。** 只往上加。已经有的功能、可见行为（包括初始化/对话 SSE）默认留下。要拿掉或换成更“干净”的替代，必须先问人，点头再改。修 bug 靠补，不靠删。
-10. **种子只产最小 agent。** 安装写出 loop + shell + edit + 通用 plugin 加载。之后所有扩展都走 plugin（`plugins/`），不写进 `seed.sh` / `build/product.sh`。种子可以跑 catalog 的 `hooks`（先缓存再跑本地文件），不能点名某个扩展。Mac / Linux / Windows 要各写一份外壳，种子一厚三份都要抄；扩展用提示词，模型在当前平台上写出来。
+10. **种子只产最小 agent。** 安装写出 loop + shell + edit + 通用 plugin 加载。`bin/agent` 出来之后，后续能力（`/`、模型台、skill、插件目录）都由产物里的模型自己构建。界面就是 `sh bin/agent`，不要再长一层 TUI。线上 agent plugin **只是提示词**，不交实现脚本。不要为新能力加厚 `seed.sh` / `build/product.sh`，也不要在 `plugins/agent/` 里代写启动器。种子可以跑 catalog 的通用 `hooks`，不能点名某个扩展。Mac / Linux / Windows 要各写一份外壳，种子一厚三份都要抄；扩展用提示词，模型在当前平台上自己想办法。
 
 ---
 
@@ -34,7 +34,7 @@ slab 是一个实验：**POSIX `/bin/sh` 能不能撑住一个带工具的 codin
 | `bin/{edit,llm,shell}` | 指向 `bin/agent` 的薄入口。 |
 | `tests/seed-package.sh` | 离线合同。不联网。必须绿。 |
 | `build/` | **设计源。** loop、提示词、任务、工具实现分开放。改种子请改这里，再 `sh build/pack.sh`。 |
-| `plugins/` | **扩展。** agent / seed 目录和脚本。换能力改这里，不改厚种子。 |
+| `plugins/` | **扩展提示词。** agent / seed 目录。换能力改提示词，不改厚种子，不在这里预置实现。 |
 | `docs/` | 给人读的理念和规格。 |
 | `.env` | 本机钥匙。不进 git。日志和证据里不得出现 key。 |
 
@@ -69,6 +69,7 @@ build/
   agent.sh                # 给人用的窗口
   prompts/
     product-system.txt    # 产物 SYSTEM
+    compact-summary.txt   # 压缩摘要提示词（清旧 tool 前先摘要）
     tools.json            # 两个 tool 的 schema
 ```
 
@@ -123,8 +124,8 @@ sh bin/agent "任务"            # 一次性
 # 错：没问就把已有 SSE / 初始化过程流关掉，改成计数心跳
 # 对：旧行为留下；要删先问；同意之前只加能力
 
-# 错：把机器图谱、检索正文、某家搜索写进 product.sh
-# 对：扩展是提示词，放 plugins/；清旧 tool 写在 loop.sh，不要为摘要再长挂钩
+# 错：把机器图谱、检索正文、某家搜索、TUI 写进 product.sh 或 plugins/agent/*.py
+# 对：线上 plugin 只是提示词；bin/agent 出来后由模型在本机写实现；清旧 tool 写在 loop.sh
 ```
 
 改完至少跑：
@@ -144,7 +145,7 @@ sh bin/agent "任务"            # 一次性
 | 对人 | 不说话；stderr 最多英文状态 | `>` + 最后回答 |
 | 工作区 | 安装目录 | 启动时的当前目录 |
 | 工具和 loop | 同一对、同一个形状 | 同一对、同一个形状 |
-| 扩展 | 不写。只留通用 hooks | 打开后拉 agent plugin |
+| 扩展 | 不写。只留通用 hooks | 打开后拉提示词，自己在本机构建 |
 
 安装时模型**不**为这台机器重写工具。工具已经在种子里。特化只有一件事：持久 shell 拉起本机 `$SHELL`（没有则 `/bin/sh`）。
 

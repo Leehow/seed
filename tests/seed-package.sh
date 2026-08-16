@@ -15,6 +15,7 @@ PLUGIN_PID=
 cleanup() {
   [ -n "${PLUGIN_PID:-}" ] && kill "$PLUGIN_PID" 2>/dev/null || true
   [ -n "${JQ_PID:-}" ] && kill "$JQ_PID" 2>/dev/null || true
+  [ -n "${FLAKY_PID:-}" ] && kill "$FLAKY_PID" 2>/dev/null || true
   rm -rf "$d"
 }
 trap cleanup EXIT
@@ -23,7 +24,7 @@ BUILD=$ROOT/build
 ck "build/pack.sh exists" test -f "$BUILD/pack.sh"
 for f in \
   loop.sh model.sh edit.sh shell.sh env.sh install.sh agent.sh product.sh \
-  prompts/product-system.txt prompts/tools.json
+  prompts/product-system.txt prompts/compact-summary.txt prompts/tools.json
 do
   ck "build/$f" test -f "$BUILD/$f"
 done
@@ -61,10 +62,18 @@ if jq -r '.prompt' "$ROOT/plugins/agent/init.json" | grep -q description \
 else
   printf 'FAIL init prompt extracts skill metadata\n'; fail=$((fail + 1))
 fi
-if jq -e '.version=="17"' "$ROOT/plugins/agent/index.json" >/dev/null 2>&1; then
-  printf 'ok   agent plugin version 17\n'
+if jq -e '.version=="28"' "$ROOT/plugins/agent/index.json" >/dev/null 2>&1; then
+  printf 'ok   agent plugin version 28\n'
 else
-  printf 'FAIL agent plugin version 17\n'; fail=$((fail + 1))
+  printf 'FAIL agent plugin version 28\n'; fail=$((fail + 1))
+fi
+if jq -r '.ask' "$ROOT/plugins/agent/init.json" | grep -q '完整' \
+  && jq -r '.ask' "$ROOT/plugins/agent/init.json" | grep -q '简单' \
+  && grep -q 'agent_print_ask' "$BUILD/product.sh" \
+  && grep -A3 'oneshot" -eq 0' "$BUILD/agent.sh" | grep -q 'agent_print_ask'; then
+  printf 'ok   engine prints plugin ask after init\n'
+else
+  printf 'FAIL engine prints plugin ask after init\n'; fail=$((fail + 1))
 fi
 if jq -e '(.machine_tree | has("host") | not)
     and (.prompt | test("top-level host") | not)
@@ -96,6 +105,14 @@ if grep -q 'old tool output cleared' "$BUILD/loop.sh" \
 else
   printf 'FAIL compact is jq in the loop\n'; fail=$((fail + 1))
 fi
+if grep -q 'earlier work summary' "$BUILD/loop.sh" \
+  && grep -q 'compact-summary.txt' "$BUILD/pack.sh" \
+  && grep -q 'compress earlier conversation' "$SEED" \
+  && grep -q 'old tool output cleared' "$BUILD/loop.sh"; then
+  printf 'ok   compact summarizes then prunes\n'
+else
+  printf 'FAIL compact summarizes then prunes\n'; fail=$((fail + 1))
+fi
 if grep -q "The task is the human's last message" "$BUILD/prompts/product-system.txt" \
   && grep -q 'Do not replace it with' "$BUILD/prompts/product-system.txt" \
   && grep -q 'agentskills.io/specification' "$BUILD/prompts/product-system.txt"; then
@@ -123,11 +140,138 @@ if jq -r '.machine_tree.system.retrieve' "$ROOT/plugins/agent/init.json" \
 else
   printf 'FAIL retrieve keeps human web queries\n'; fail=$((fail + 1))
 fi
+if jq -e '.optional.seed_agent=="seed-agent.json"' \
+  "$ROOT/plugins/agent/index.json" >/dev/null 2>&1; then
+  printf 'ok   catalog has optional seed_agent\n'
+else
+  printf 'FAIL catalog has optional seed_agent\n'; fail=$((fail + 1))
+fi
+if jq -r '.machine_tree.system.retrieve' "$ROOT/plugins/agent/init.json" \
+    | grep -q 'ours.edition' \
+  && jq -r '.machine_tree.system.retrieve' "$ROOT/plugins/agent/init.json" \
+    | grep -q 'seed-agent' \
+  && jq -r '.machine_tree.system.retrieve' "$ROOT/plugins/agent/init.json" \
+    | grep -q 'only ask' \
+  && jq -r '.machine_tree.system.retrieve' "$ROOT/plugins/agent/init.json" \
+    | grep -q 'oneshot' \
+  && jq -r '.machine_tree.system.retrieve' "$ROOT/plugins/agent/init.json" \
+    | grep -q 'SEED_PLUGIN_ROOT' \
+  && jq -r '.machine_tree.system.retrieve' "$ROOT/plugins/agent/init.json" \
+    | grep -q 'prompts only' \
+  && jq -r '.machine_tree.system.retrieve' "$ROOT/plugins/agent/init.json" \
+    | grep -q 'starts with /'; then
+  printf 'ok   retrieve has seed-agent gate\n'
+else
+  printf 'FAIL retrieve has seed-agent gate\n'; fail=$((fail + 1))
+fi
+sa_ok=1
+for f in seed-agent.json skills.json commands.json models.json plugins.json delegate.json; do
+  [ -f "$ROOT/plugins/agent/$f" ] || sa_ok=0
+done
+if [ "$sa_ok" -eq 1 ] \
+  && [ ! -f "$ROOT/plugins/agent/tui.json" ] \
+  && jq -r '.prompt' "$ROOT/plugins/agent/seed-agent.json" | grep -q 'skills' \
+  && jq -r '.prompt' "$ROOT/plugins/agent/seed-agent.json" | grep -q 'commands' \
+  && jq -r '.prompt' "$ROOT/plugins/agent/seed-agent.json" | grep -q 'models' \
+  && jq -r '.prompt' "$ROOT/plugins/agent/seed-agent.json" | grep -q 'plugins' \
+  && jq -r '.prompt' "$ROOT/plugins/agent/seed-agent.json" | grep -q 'Do not write a TUI' \
+  && jq -r '.prompt' "$ROOT/plugins/agent/seed-agent.json" | grep -q 'ours.seed_agent' \
+  && jq -r '.prompt' "$ROOT/plugins/agent/seed-agent.json" | grep -q 'prompts only' \
+  && jq -r '.prompt' "$ROOT/plugins/agent/seed-agent.json" | grep -q 'no shipped' \
+  && jq -r '.prompt' "$ROOT/plugins/agent/seed-agent.json" | grep -q 'leave that key unset' \
+  && jq -r '.prompt' "$ROOT/plugins/agent/skills.json" | grep -q 'agent-store/seed-agent/skills' \
+  && jq -r '.prompt' "$ROOT/plugins/agent/skills.json" | grep -q '.agents/skills' \
+  && jq -r '.prompt' "$ROOT/plugins/agent/commands.json" | grep -q '/models' \
+  && jq -r '.prompt' "$ROOT/plugins/agent/commands.json" | grep -q '/tools' \
+  && jq -r '.prompt' "$ROOT/plugins/agent/commands.json" | grep -q '/help' \
+  && jq -r '.prompt' "$ROOT/plugins/agent/models.json" | grep -q 'LLM_' \
+  && jq -r '.prompt' "$ROOT/plugins/agent/models.json" | grep -q 'do not print' \
+  && jq -r '.prompt' "$ROOT/plugins/agent/plugins.json" | grep -q '.seed-agent/plugins' \
+  && jq -r '.prompt' "$ROOT/plugins/agent/seed-agent.json" | grep -q 'AGENT_MAX_ROUNDS' \
+  && jq -r '.prompt' "$ROOT/plugins/agent/seed-agent.json" | grep -q 'Always GET' \
+  && jq -r '.prompt' "$ROOT/plugins/agent/commands.json" | grep -q 'Chinese' \
+  && jq -r '.machine_tree.system.retrieve' "$ROOT/plugins/agent/init.json" | grep -q '重做' \
+  && jq -r '.machine_tree.system.retrieve' "$ROOT/plugins/agent/init.json" | grep -q 'Do not write a TUI' \
+  && jq -r '.prompt' "$ROOT/plugins/agent/commands.json" | grep -q 'Check before done' \
+  && jq -r '.prompt' "$ROOT/plugins/agent/models.json" | grep -q 'Check before done'; then
+  printf 'ok   seed-agent prompt pack\n'
+else
+  printf 'FAIL seed-agent prompt pack\n'; fail=$((fail + 1))
+fi
+if jq -r '.prompt' "$ROOT/plugins/agent/delegate.json" | grep -q -- '--oneshot' \
+  && jq -r '.prompt' "$ROOT/plugins/agent/delegate.json" | grep -q '.agent-runs' \
+  && jq -r '.prompt' "$ROOT/plugins/agent/delegate.json" | grep -q 'kill -0' \
+  && jq -r '.prompt' "$ROOT/plugins/agent/delegate.json" | grep -q 'no further delegation' \
+  && jq -r '.prompt' "$ROOT/plugins/agent/delegate.json" | grep -q 'leave ours.seed_agent.delegate unset' \
+  && jq -r '.prompt' "$ROOT/plugins/agent/seed-agent.json" | grep -q 'delegate.json' \
+  && jq -r '.prompt' "$ROOT/plugins/agent/seed-agent.json" | grep -q 'then delegate'; then
+  printf 'ok   delegate prompt block\n'
+else
+  printf 'FAIL delegate prompt block\n'; fail=$((fail + 1))
+fi
+if jq -r '.prompt' "$ROOT/plugins/agent/commands.json" | grep -q '/refine' \
+  && jq -r '.prompt' "$ROOT/plugins/agent/commands.json" | grep -q 'snapshots' \
+  && jq -r '.prompt' "$ROOT/plugins/agent/commands.json" | grep -q '.agent-memory/index.json' \
+  && jq -r '.prompt' "$ROOT/plugins/agent/commands.json" | grep -q 'never changes system.retrieve' \
+  && jq -r '.machine_tree.system.retrieve' "$ROOT/plugins/agent/init.json" \
+    | grep -q 'Project memory' \
+  && jq -r '.machine_tree.system.retrieve' "$ROOT/plugins/agent/init.json" \
+    | grep -q 'never cat the whole memory file'; then
+  printf 'ok   refine command and memory read loop\n'
+else
+  printf 'FAIL refine command and memory read loop\n'; fail=$((fail + 1))
+fi
+if jq -e '.memory_tree.version=="2"' "$ROOT/plugins/agent/init.json" >/dev/null 2>&1 \
+  && jq -r '.machine_tree.system.retrieve' "$ROOT/plugins/agent/init.json" \
+    | grep -q 'when a hit has a path' \
+  && jq -r '.machine_tree.system.retrieve' "$ROOT/plugins/agent/init.json" \
+    | grep -q '记住' \
+  && jq -r '.prompt' "$ROOT/plugins/agent/commands.json" | grep -q 'lesson, preference, decision' \
+  && jq -r '.prompt' "$ROOT/plugins/agent/commands.json" | grep -q 'supersede' \
+  && jq -r '.prompt' "$ROOT/plugins/agent/commands.json" | grep -q 'sk-' \
+  && jq -r '.prompt' "$ROOT/plugins/agent/commands.json" | grep -q '/Users/'; then
+  printf 'ok   memory tree v2 shape and rules\n'
+else
+  printf 'FAIL memory tree v2 shape and rules\n'; fail=$((fail + 1))
+fi
+if grep -q 'redirect them to files' "$BUILD/prompts/product-system.txt"; then
+  printf 'ok   product keeps large outputs in files\n'
+else
+  printf 'FAIL product keeps large outputs in files\n'; fail=$((fail + 1))
+fi
+agent_impl=0
+for f in "$ROOT/plugins/agent"/*; do
+  [ -e "$f" ] || continue
+  [ -d "$f" ] && { agent_impl=1; continue; }
+  case $f in
+    *.json) ;;
+    *) agent_impl=1 ;;
+  esac
+done
+if [ "$agent_impl" -eq 0 ]; then
+  printf 'ok   agent plugin is prompts only\n'
+else
+  printf 'FAIL agent plugin is prompts only\n'; fail=$((fail + 1))
+fi
+if grep -q seed-agent "$BUILD/product.sh" \
+  || grep -q seed-agent "$BUILD/loop.sh" \
+  || grep -q seed-agent "$BUILD/prompts/product-system.txt"; then
+  printf 'FAIL seed does not name seed-agent\n'; fail=$((fail + 1))
+else
+  printf 'ok   seed does not name seed-agent\n'
+fi
 if jq -r '.prompt' "$ROOT/plugins/agent/init.json" | grep -q 'Never assign a shell variable named path' \
-  && jq -r '.prompt' "$ROOT/plugins/agent/init.json" | grep -q 'Empty stdout with exit 0 is success'; then
+  && jq -r '.prompt' "$ROOT/plugins/agent/init.json" | grep -q 'already probed by the engine'; then
   printf 'ok   init prompt does not clobber PATH\n'
 else
   printf 'FAIL init prompt does not clobber PATH\n'; fail=$((fail + 1))
+fi
+if grep -q 'agent_probe_tools' "$BUILD/product.sh" \
+  && grep -q 'command -v' "$BUILD/product.sh" \
+  && grep -A6 'agent_place_trees$' "$BUILD/product.sh" | grep -q 'agent_probe_tools'; then
+  printf 'ok   engine owns the tool probe\n'
+else
+  printf 'FAIL engine owns the tool probe\n'; fail=$((fail + 1))
 fi
 if jq -e '.machine_tree.system.web.fetch.use' "$ROOT/plugins/agent/init.json" >/dev/null 2>&1 \
   && ! jq -e '.machine_tree.system.web | has("websearch")' \
@@ -502,6 +646,10 @@ awk 'BEGIN{for(i=0;i<300;i++)printf "X"}' > "$cwork/fat.txt"
 printf '\n' >> "$cwork/fat.txt"
 cat > "$stub" <<'EOF'
 #!/bin/sh
+if grep -q 'compress earlier conversation' "$2" 2>/dev/null; then
+  printf '%s\n' '{"content":"Goal: test. Next: none.","tool_calls":[],"usage":{"prompt_tokens":10,"completion_tokens":1}}'
+  exit 0
+fi
 n=$(cat "${STUB_N}" 2>/dev/null || echo 0); n=$((n + 1)); printf '%s\n' "$n" > "${STUB_N}"
 case $n in
   1) printf '%s\n' '{"content":"","tool_calls":[{"id":"c1","name":"shell","arguments":"{\"command\":\"cat fat.txt\"}"}],"usage":{"prompt_tokens":1000,"completion_tokens":1}}' ;;
@@ -525,12 +673,14 @@ done
 if [ -n "$cmpmsg" ] \
   && ! grep -q 'XXXXXXXXXX' "$cmpmsg" \
   && grep -q 'old tool output cleared' "$cmpmsg" \
+  && grep -q 'earlier work summary' "$cmpmsg" \
+  && grep -q 'Goal: test' "$cmpmsg" \
   && ! grep -q 'CONTEXT COMPACTION' "$cmpmsg"; then
-  printf 'ok   compact prunes old tool output\n'
+  printf 'ok   compact summarizes and prunes old tool output\n'
 else
-  printf 'FAIL compact prunes old tool output\n'; fail=$((fail + 1))
+  printf 'FAIL compact summarizes and prunes old tool output\n'; fail=$((fail + 1))
 fi
-if grep -q 'compact: pruned' "$d/cmp.err"; then
+if grep -q 'compact: summarized' "$d/cmp.err"; then
   printf 'ok   compact prints machine line\n'
 else
   printf 'FAIL compact prints machine line\n'; fail=$((fail + 1))
@@ -616,6 +766,57 @@ if grep -R 'reasoning_content' "$repl/.agent-runs" >/dev/null 2>&1; then
   printf 'FAIL interactive context drops thinking\n'; fail=$((fail + 1))
 else
   printf 'ok   interactive context drops thinking\n'
+fi
+
+# a model error must not kill the interactive window
+cat > "$stub" <<'EOF'
+#!/bin/sh
+n=$(cat "${STUB_N}" 2>/dev/null || echo 0); n=$((n + 1)); printf '%s\n' "$n" > "${STUB_N}"
+if [ "$n" -eq 1 ]; then
+  exit 71
+fi
+printf '{"content":"second-fine","tool_calls":[],"usage":{"prompt_tokens":1,"completion_tokens":1}}\n'
+EOF
+printf '0\n' > "$STUB_N"
+swork=$d/swork
+mkdir -p "$swork"
+(
+  cd "$swork"
+  export SLAB_SKIP_INIT=1 SEED_LLM_STUB=$stub STUB_N=$STUB_N
+  printf 'boom\nagain\n' | "$cwd/bin/agent"
+) > "$d/sur.out" 2> "$d/sur.err" || true
+if grep -q 'second-fine' "$d/sur.out"; then
+  printf 'ok   model error does not kill the window\n'
+else
+  printf 'FAIL model error does not kill the window\n'; fail=$((fail + 1))
+fi
+
+# --resume continues the latest conversation in this workspace
+cat > "$stub" <<'EOF'
+#!/bin/sh
+printf '{"content":"resumed-ok","tool_calls":[],"usage":{"prompt_tokens":1,"completion_tokens":1}}\n'
+EOF
+printf '0\n' > "$STUB_N"
+rwork=$d/rwork
+mkdir -p "$rwork"
+(
+  cd "$rwork"
+  export SLAB_SKIP_INIT=1 SEED_LLM_STUB=$stub STUB_N=$STUB_N
+  "$cwd/bin/agent" --oneshot 'first-task-marker' >/dev/null 2>&1
+  sleep 1
+  "$cwd/bin/agent" --resume 'second-task-marker'
+) > "$d/res.out" 2> "$d/res.err" || true
+res_linked=0
+for m in "$rwork/.agent-runs"/*/messages.json; do
+  [ -f "$m" ] || continue
+  if grep -q 'first-task-marker' "$m" && grep -q 'second-task-marker' "$m"; then
+    res_linked=1
+  fi
+done
+if [ "$res_linked" -eq 1 ] && grep -q 'resumed-ok' "$d/res.out"; then
+  printf 'ok   resume continues the conversation\n'
+else
+  printf 'FAIL resume continues the conversation\n'; fail=$((fail + 1))
 fi
 
 # outbound request must drop thinking even if a prior message stored it
@@ -791,6 +992,11 @@ if command -v python3 >/dev/null 2>&1 && command -v curl >/dev/null 2>&1; then
   ck "qwen .env has picked model" grep -q 'LLM_MODEL=qwen-plus' "$qdir/.env"
   ck "qwen .env has provider" grep -q 'LLM_PROVIDER=qwen' "$qdir/.env"
   ck "qwen key not in stderr" awk 'BEGIN{c=0} /sk-TESTQWEN/{c=1} END{exit c}' "$d/qwen.err"
+  if grep '^LLM_EXTRA=' "$qdir/.env" | grep -q thinking; then
+    printf 'FAIL qwen extra keeps deepseek fields out\n'; fail=$((fail + 1))
+  else
+    printf 'ok   qwen extra keeps deepseek fields out\n'
+  fi
   nodir=$d/nopick
   mkdir -p "$nodir"
   (
@@ -812,6 +1018,62 @@ if command -v python3 >/dev/null 2>&1 && command -v curl >/dev/null 2>&1; then
     printf 'ok   unknown channel lists catalog\n'
   else
     printf 'FAIL unknown channel lists catalog\n'; fail=$((fail + 1))
+  fi
+
+  # llm retries once on a transient 5xx, then succeeds
+  flaky=$d/flaky
+  mkdir -p "$flaky"
+  cat > "$flaky/server.py" <<'PY'
+import http.server
+import json
+import sys
+
+hits = {"n": 0}
+
+
+class H(http.server.BaseHTTPRequestHandler):
+    def do_POST(self):
+        ln = int(self.headers.get('Content-Length') or 0)
+        self.rfile.read(ln)
+        hits["n"] += 1
+        if hits["n"] == 1:
+            self.send_response(500)
+            self.end_headers()
+            self.wfile.write(b'boom')
+            return
+        body = json.dumps({
+            "choices": [{"message": {"content": "retried-ok", "tool_calls": []}}],
+            "usage": {"prompt_tokens": 1, "completion_tokens": 1},
+        }).encode()
+        self.send_response(200)
+        self.send_header('Content-Type', 'application/json')
+        self.send_header('Content-Length', str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def log_message(self, *a):
+        pass
+
+
+http.server.HTTPServer(("127.0.0.1", int(sys.argv[1])), H).serve_forever()
+PY
+  FPORT=$(python3 -c 'import socket;s=socket.socket();s.bind(("127.0.0.1",0));print(s.getsockname()[1]);s.close()')
+  python3 "$flaky/server.py" "$FPORT" >/dev/null 2>&1 &
+  FLAKY_PID=$!
+  i=0
+  while [ "$i" -lt 30 ]; do
+    curl -sS -o /dev/null "http://127.0.0.1:$FPORT/" 2>/dev/null && break
+    i=$((i + 1))
+    sleep 0.1
+  done
+  rout=$(printf 'hi' | LLM_API_KEY=sk-FAKEFLAKY LLM_API_URL="http://127.0.0.1:$FPORT/chat" \
+    LLM_MODEL=m LLM_PROVIDER=test /bin/sh "$cwd/bin/agent" --llm 2> "$d/flaky.err" || true)
+  kill "$FLAKY_PID" 2>/dev/null || true
+  FLAKY_PID=
+  if printf '%s' "$rout" | grep -q 'retried-ok' && grep -q 'llm: retry' "$d/flaky.err"; then
+    printf 'ok   llm retries a transient error\n'
+  else
+    printf 'FAIL llm retries a transient error\n'; fail=$((fail + 1))
   fi
 
   # first open without agent plugin: error, no prompt
@@ -861,6 +1123,11 @@ EOF
   else
     printf 'FAIL first open inits then prompts\n'; fail=$((fail + 1))
   fi
+  if grep -q '完整' "$d/init.err" && grep -q '简单' "$d/init.err"; then
+    printf 'ok   first open prints Chinese edition ask\n'
+  else
+    printf 'FAIL first open prints Chinese edition ask\n'; fail=$((fail + 1))
+  fi
   if grep -q 'inited' "$d/init.out"; then
     printf 'FAIL init hid model final text\n'; fail=$((fail + 1))
   else
@@ -904,6 +1171,26 @@ EOF
   else
     printf 'FAIL ready agent opens offline\n'; fail=$((fail + 1))
   fi
+  if grep -q '完整' "$d/ready.err"; then
+    printf 'ok   unset edition still prints ask offline\n'
+  else
+    printf 'FAIL unset edition still prints ask offline\n'; fail=$((fail + 1))
+  fi
+  jq '.ours.edition="simple"' "$cwd/agent-store/index.json" \
+    > "$cwd/agent-store/index.json.tmp"
+  mv "$cwd/agent-store/index.json.tmp" "$cwd/agent-store/index.json"
+  (
+    cd "$cwd"
+    SEED_PLUGIN_ROOT=http://127.0.0.1:1 "$cwd/bin/agent" </dev/null
+  ) > "$d/chosen.out" 2> "$d/chosen.err" || true
+  if grep -q '>' "$d/chosen.err" && ! grep -q '完整' "$d/chosen.err"; then
+    printf 'ok   chosen edition skips ask\n'
+  else
+    printf 'FAIL chosen edition skips ask\n'; fail=$((fail + 1))
+  fi
+  jq 'del(.ours.edition)' "$cwd/agent-store/index.json" \
+    > "$cwd/agent-store/index.json.tmp"
+  mv "$cwd/agent-store/index.json.tmp" "$cwd/agent-store/index.json"
 
   # version bump: plain open does not refetch; --update does
   oldver=
@@ -975,6 +1262,42 @@ EOF
     printf 'ok   --update drops leftover web slots\n'
   else
     printf 'FAIL --update drops leftover web slots\n'; fail=$((fail + 1))
+  fi
+
+  # engine probes tools before the model runs; a ready-only stub is enough
+  pr=$d/probe
+  mkdir -p "$pr/bin"
+  cp "$cwd/.env" "$pr/.env"
+  cp "$cwd/bin/agent" "$pr/bin/agent"
+  chmod 755 "$pr/bin/agent"
+  cat > "$pr/ready-only.sh" <<'SH'
+#!/bin/sh
+jq '.ready=true | .updated="t"' agent-store/index.json > agent-store/index.json.tmp
+mv agent-store/index.json.tmp agent-store/index.json
+SH
+  chmod 755 "$pr/ready-only.sh"
+  cat > "$stub" <<'EOF'
+#!/bin/sh
+n=$(cat "${STUB_N}" 2>/dev/null || echo 0); n=$((n + 1)); printf '%s\n' "$n" > "${STUB_N}"
+if [ "$n" -eq 1 ]; then
+  printf '%s\n' '{"content":"","tool_calls":[{"id":"p1","name":"shell","arguments":"{\"command\":\"sh ready-only.sh\"}"}],"usage":{"prompt_tokens":1,"completion_tokens":1}}'
+else
+  printf '%s\n' '{"content":"probed","tool_calls":[],"usage":{"prompt_tokens":1,"completion_tokens":1}}'
+fi
+EOF
+  printf '0\n' > "$STUB_N"
+  (
+    cd "$pr"
+    SEED_PLUGIN_ROOT=$PROOT2 SEED_LLM_STUB=$stub STUB_N=$STUB_N \
+      "$pr/bin/agent" </dev/null
+  ) > "$d/probe.out" 2> "$d/probe.err" || true
+  if grep -q '>' "$d/probe.err" \
+    && jq -e '.system.tools.sh.ok==true and .system.tools.jq.ok==true
+        and (.system.tools.jq.path|length>0)' \
+      "$pr/agent-store/index.json" >/dev/null 2>&1; then
+    printf 'ok   engine probes tools deterministically\n'
+  else
+    printf 'FAIL engine probes tools deterministically\n'; fail=$((fail + 1))
   fi
 
   # model wrote ready + skills at the top level, dropped version/ours:

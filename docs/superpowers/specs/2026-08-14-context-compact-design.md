@@ -1,7 +1,7 @@
 # 上下文压缩：loop 里 jq 清旧 tool
 
 - 日期：2026-08-14
-- 状态：已拍板（只留一层 jq；模型摘要和 plugin 已撤）
+- 状态：已拍板（只留一层 jq；模型摘要和 plugin 已撤。模型摘要一条后被 [压缩 v2](2026-08-16-summary-compact-design.md) 接替：清之前先摘要，jq 清除留作兜底）
 - 前序：[产物 agent](2026-08-14-agent-product-design.md)
 
 ## 1. 要解决什么

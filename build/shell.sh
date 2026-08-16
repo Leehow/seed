@@ -67,10 +67,13 @@ shell_run() {
   : > "$session/stderr"
   printf '%s\n' "$cmd" > "$session/request.tmp"
   mv "$session/request.tmp" "$session/request"
+  # Poll in 0.05s ticks when sleep takes decimals (worker does the same);
+  # 20 ticks equal one second so the timeout math stays in seconds.
   n=0
+  max=$((ACTION_TIMEOUT * 20))
   while [ ! -f "$session/done" ]; do
     n=$((n + 1))
-    if [ "$n" -gt "$ACTION_TIMEOUT" ]; then
+    if [ "$n" -gt "$max" ]; then
       if [ -f "$session/pid" ]; then
         kill_tree "$(cat "$session/pid")"
         sleep 1
@@ -84,7 +87,10 @@ shell_run() {
       shell_init "$session" "$wd"
       break
     fi
-    sleep 1
+    if ! sleep 0.05 2>/dev/null; then
+      sleep 1
+      n=$((n + 19))
+    fi
   done
   out=$session/stdout err=$session/stderr
   st=$(cat "$session/status" 2>/dev/null || echo 1)

@@ -112,7 +112,10 @@ ensure_jq() {
   command -v jq >/dev/null 2>&1 || die "need jq" 69
 }
 
+# DeepSeek-only request field. Other channels keep their catalog extra
+# untouched; unknown fields can 400 on OpenAI-compatible endpoints.
 disable_thinking() {
+  [ "${LLM_PROVIDER:-}" = deepseek ] || return 0
   extra=${LLM_EXTRA:-'{}'}
   LLM_EXTRA=$(printf '%s' "$extra" | jq -c '. + {"thinking":{"type":"disabled"}}')
 }
@@ -163,25 +166,40 @@ plugin_join() {
   esac
 }
 
-plugin_get() {
-  url=$1
-  auth=${2:-}
+# One GET for every plugin fetch. Body lands in dest; HTTP_CODE and
+# HTTP_CURL carry the outcome. Returns 0 only on curl ok + HTTP 2xx.
+http_get() {
+  hg_url=$1
+  hg_dest=$2
+  hg_auth=${3:-}
   need curl
-  body=$(mktemp "${TMPDIR:-/tmp}/seed-plug.XXXXXX")
   set +e
-  if [ -n "$auth" ]; then
-    code=$(curl -q -sS --connect-timeout 5 --max-time 30 \
-      -H "Authorization: Bearer $auth" -o "$body" -w '%{http_code}' "$url")
+  if [ -n "$hg_auth" ]; then
+    HTTP_CODE=$(curl -q -sS --connect-timeout 5 --max-time 30 \
+      -H "Authorization: Bearer $hg_auth" -o "$hg_dest" -w '%{http_code}' "$hg_url")
   else
-    code=$(curl -q -sS --connect-timeout 5 --max-time 30 -o "$body" -w '%{http_code}' "$url")
+    HTTP_CODE=$(curl -q -sS --connect-timeout 5 --max-time 30 \
+      -o "$hg_dest" -w '%{http_code}' "$hg_url")
   fi
-  cs=$?
+  HTTP_CURL=$?
   set -e
-  [ "$cs" -eq 0 ] || { rm -f "$body"; die "plugin: network failed (curl=$cs)" 71; }
-  case $code in
-    2*) cat "$body"; rm -f "$body" ;;
-    *) rm -f "$body"; die "plugin: HTTP $code" 72 ;;
+  [ "$HTTP_CURL" -eq 0 ] || return 1
+  case $HTTP_CODE in
+    2*) return 0 ;;
   esac
+  return 1
+}
+
+plugin_get() {
+  pg_body=$(mktemp "${TMPDIR:-/tmp}/seed-plug.XXXXXX")
+  if http_get "$1" "$pg_body" "${2:-}"; then
+    cat "$pg_body"
+    rm -f "$pg_body"
+    return 0
+  fi
+  rm -f "$pg_body"
+  [ "$HTTP_CURL" -eq 0 ] || die "plugin: network failed (curl=$HTTP_CURL)" 71
+  die "plugin: HTTP $HTTP_CODE" 72
 }
 
 api_origin() {
@@ -299,7 +317,9 @@ edit_main() {
   [ -n "$old" ] || { printf 'edit: old_text is empty\n' >&2; return 2; }
   [ -f "$path" ] || { printf 'edit: cannot read %s\n' "$path" >&2; return 66; }
   tmp=$(mktemp "${TMPDIR:-/tmp}/seed-edit.XXXXXX")
-  set +e
+  # || capture, not set +e/-e: re-enabling errexit here would undo the
+  # loop's guard, so one bad edit would kill the whole agent.
+  es=0
   jq -nr --rawfile t "$path" --arg old "$old" --arg new "$new" '
     ($t | split($old)) as $p
     | if ($p | length) != 2 then
@@ -307,9 +327,7 @@ edit_main() {
       else
         $p[0] + $new + $p[1]
       end
-  ' > "$tmp"
-  es=$?
-  set -e
+  ' > "$tmp" || es=$?
   if [ "$es" -ne 0 ]; then
     rm -f "$tmp"
     return "$es"
@@ -386,10 +404,13 @@ shell_run() {
   : > "$session/stderr"
   printf '%s\n' "$cmd" > "$session/request.tmp"
   mv "$session/request.tmp" "$session/request"
+  # Poll in 0.05s ticks when sleep takes decimals (worker does the same);
+  # 20 ticks equal one second so the timeout math stays in seconds.
   n=0
+  max=$((ACTION_TIMEOUT * 20))
   while [ ! -f "$session/done" ]; do
     n=$((n + 1))
-    if [ "$n" -gt "$ACTION_TIMEOUT" ]; then
+    if [ "$n" -gt "$max" ]; then
       if [ -f "$session/pid" ]; then
         kill_tree "$(cat "$session/pid")"
         sleep 1
@@ -403,7 +424,10 @@ shell_run() {
       shell_init "$session" "$wd"
       break
     fi
-    sleep 1
+    if ! sleep 0.05 2>/dev/null; then
+      sleep 1
+      n=$((n + 19))
+    fi
   done
   out=$session/stdout err=$session/stderr
   st=$(cat "$session/status" 2>/dev/null || echo 1)
@@ -512,19 +536,29 @@ llm_context_overflow() {
   grep -qiE 'context_length|context length|too many tokens|maximum context|prompt is too long|prompt_too_long' "$1" 2>/dev/null
 }
 
+# Model errors return instead of exiting so an interactive window can
+# survive one bad turn. Transient failures (network, truncated stream,
+# 429, 5xx) get one retry; 401/403/400 do not.
 model_turn() {
   in_msgs=$1
   dest=$2
   work=$(mktemp -d "${TMPDIR:-/tmp}/seed-llm.XXXXXX")
   strip_msg_thinking "$in_msgs" "$work/msgs.json"
   if [ -n "${SEED_LLM_STUB:-}" ]; then
-    "$SEED_LLM_STUB" --messages "$work/msgs.json" > "$dest"
+    # || capture, not set +e/-e: flipping errexit inside a function
+    # would undo the caller's guard and kill the interactive window.
+    st=0
+    "$SEED_LLM_STUB" --messages "$work/msgs.json" > "$dest" || st=$?
     rm -rf "$work"
-    return 0
+    return "$st"
   fi
   load_env
   disable_thinking
-  [ -n "${LLM_API_KEY:-}" ] || die 'missing API key (.env or environment)' 64
+  if [ -z "${LLM_API_KEY:-}" ]; then
+    rm -rf "$work"
+    printf 'error: missing API key (.env or environment)\n' >&2
+    return 64
+  fi
   need curl
   need jq
   tools_json > "$work/tools.json"
@@ -535,36 +569,57 @@ model_turn() {
     '{model:$m,stream:$st,messages:$msg[0],tools:$t[0]} + $x' \
     > "$work/req.json"
   printf 'Authorization: Bearer %s\nContent-Type: application/json\n' "$LLM_API_KEY" > "$work/h"
-  set +e
-  if [ "$stream" = true ]; then
-    curl -q -N -sS --connect-timeout 15 --max-time "$HTTP_TIMEOUT" -X POST \
-      -H "@$work/h" --data-binary "@$work/req.json" \
-      -w '\n__HTTP__%{http_code}\n' "$LLM_API_URL" \
-      | tee "$work/raw" | stream_print
+  try=1
+  while :; do
     cs=0
-    [ -s "$work/raw" ] || cs=1
-  else
-    curl -q -sS --connect-timeout 15 --max-time "$HTTP_TIMEOUT" -X POST \
-      -H "@$work/h" --data-binary "@$work/req.json" \
-      -w '\n__HTTP__%{http_code}\n' "$LLM_API_URL" > "$work/raw"
-    cs=$?
-  fi
-  set -e
-  [ "$cs" -eq 0 ] || { rm -rf "$work"; die "llm: network failed (curl=$cs)" 71; }
-  code=$(awk '/^__HTTP__/{print substr($0,9)}' "$work/raw" | tail -1)
-  case $code in
-    2*) : ;;
-    401|403) rm -rf "$work"; die "llm: API key rejected (HTTP $code)" 77 ;;
-    400|413)
-      if llm_context_overflow "$work/raw"; then
+    if [ "$stream" = true ]; then
+      curl -q -N -sS --connect-timeout 15 --max-time "$HTTP_TIMEOUT" -X POST \
+        -H "@$work/h" --data-binary "@$work/req.json" \
+        -w '\n__HTTP__%{http_code}\n' "$LLM_API_URL" \
+        | tee "$work/raw" | stream_print || :
+      [ -s "$work/raw" ] || cs=1
+    else
+      curl -q -sS --connect-timeout 15 --max-time "$HTTP_TIMEOUT" -X POST \
+        -H "@$work/h" --data-binary "@$work/req.json" \
+        -w '\n__HTTP__%{http_code}\n' "$LLM_API_URL" > "$work/raw" || cs=$?
+    fi
+    code=
+    if [ "$cs" -eq 0 ]; then
+      code=$(awk '/^__HTTP__/{print substr($0,9)}' "$work/raw" | tail -1)
+    fi
+    case "$cs:${code:-}" in
+      0:2*) break ;;
+      0:401|0:403)
         rm -rf "$work"
-        return 73
-      fi
-      rm -rf "$work"
-      die "llm: HTTP $code" 72
-      ;;
-    *) rm -rf "$work"; die "llm: HTTP ${code:-000}" 72 ;;
-  esac
+        printf 'error: llm: API key rejected (HTTP %s)\n' "$code" >&2
+        return 77
+        ;;
+      0:400|0:413)
+        if llm_context_overflow "$work/raw"; then
+          rm -rf "$work"
+          return 73
+        fi
+        rm -rf "$work"
+        printf 'error: llm: HTTP %s\n' "$code" >&2
+        return 72
+        ;;
+      *)
+        if [ "$try" -eq 1 ]; then
+          try=2
+          printf 'llm: retry\n' >&2
+          sleep 2
+          continue
+        fi
+        rm -rf "$work"
+        if [ "$cs" -ne 0 ]; then
+          printf 'error: llm: network failed (curl=%s)\n' "$cs" >&2
+          return 71
+        fi
+        printf 'error: llm: HTTP %s\n' "${code:-000}" >&2
+        return 72
+        ;;
+    esac
+  done
   if [ "$stream" = true ]; then
     parse_stream "$work/raw" > "$dest"
     [ "${SEED_STREAM_PRINT:-}" = 1 ] && printf '\n' >&2
@@ -584,16 +639,18 @@ llm_main() {
       *) die "llm: unknown argument $1" 64 ;;
     esac
   done
-  work=$(mktemp -d "${TMPDIR:-/tmp}/seed-llmcli.XXXXXX")
-  trap 'rm -rf "$work"' EXIT
-  if [ -n "$msgs" ]; then cp "$msgs" "$work/m.json"
+  # Own dir name: model_turn reuses the global work variable (sh has no
+  # locals) and removes its dir, which used to orphan this one.
+  lw=$(mktemp -d "${TMPDIR:-/tmp}/seed-llmcli.XXXXXX")
+  trap 'rm -rf "$lw"' EXIT
+  if [ -n "$msgs" ]; then cp "$msgs" "$lw/m.json"
   else
-    cat > "$work/p.txt"
-    [ -s "$work/p.txt" ] || die 'llm: empty stdin' 64
-    jq -Rs '[{role:"user",content:.}]' < "$work/p.txt" > "$work/m.json"
+    cat > "$lw/p.txt"
+    [ -s "$lw/p.txt" ] || die 'llm: empty stdin' 64
+    jq -Rs '[{role:"user",content:.}]' < "$lw/p.txt" > "$lw/m.json"
   fi
-  model_turn "$work/m.json" "$work/t.json"
-  jq -r '.content // empty' "$work/t.json"
+  model_turn "$lw/m.json" "$lw/t.json"
+  jq -r '.content // empty' "$lw/t.json"
 }
 
 # Clear old fat tool bodies when prompt_tokens cross 70% of the window.
@@ -737,6 +794,7 @@ run_loop() {
   agent_compact "$msgs" "$last_pt" || true
   round=1
   final=
+  rd=${AGENT_RUNS_DIR:-$PWD/.agent-runs}
   while [ "$round" -le "$max" ]; do
     set +e
     model_turn "$msgs" "$evdir/turn-$round.json"
@@ -788,6 +846,8 @@ run_loop() {
       fi
     else
       final=$content
+      mkdir -p "$rd"
+      printf '%s' "$final" > "$evdir/committed"
       jq --arg c "$content" '. + [{role:"assistant",content:$c}]' "$msgs" > "$msgs.n" && mv "$msgs.n" "$msgs"
       break
     fi
@@ -804,6 +864,9 @@ run_loop() {
     return 75
   fi
   [ "$print_final" -eq 1 ] && [ -n "$final" ] && printf '%s\n' "$final"
+  if [ "$print_final" -eq 1 ] && [ -n "$final" ]; then
+    (rm -f "$rd/committed" 2>/dev/null; printf '%s\n' "$final" > "$rd/committed" 2>/dev/null) || :
+  fi
   return 0
 }
 
@@ -927,6 +990,18 @@ skill_catalog() {
   ' "$scf" 2>/dev/null || true
 }
 
+# Two lines of ready state from the Machine index so plain tasks do not
+# burn a round on jq-reading it: the edition choice and which tools are ok.
+agent_state_lines() {
+  sf=$INSTALL/agent-store/index.json
+  [ -f "$sf" ] || return 0
+  jq -r '
+    "Edition: " + (.ours.edition // "unset"),
+    "Tools ok: " + ([.system.tools // {} | to_entries[]
+      | select(.value.ok == true) | .key] | join(" "))
+  ' "$sf" 2>/dev/null || true
+}
+
 product_system() {
   printf '%s\nModel: %s (%s)\nMachine index: %s\nProject memory: %s\n' \
     "$(cabin_product_system)" \
@@ -934,41 +1009,31 @@ product_system() {
     "${LLM_PROVIDER:-unknown}" \
     "$INSTALL/agent-store/index.json" \
     "$PWD/.agent-memory/index.json"
+  agent_state_lines
   skill_catalog
   agent_run_hooks system
 }
 
 agent_plugin_get() {
-  url=$1
-  need curl
-  body=$(mktemp "${TMPDIR:-/tmp}/seed-aplg.XXXXXX")
-  set +e
-  code=$(curl -q -sS --connect-timeout 5 --max-time 30 -o "$body" -w '%{http_code}' "$url")
-  cs=$?
-  set -e
-  [ "$cs" -eq 0 ] || { rm -f "$body"; die "agent plugin: network failed (curl=$cs)" 71; }
-  case $code in
-    2*) cat "$body"; rm -f "$body" ;;
-    *) rm -f "$body"; die "agent plugin: HTTP $code" 72 ;;
-  esac
+  ap_body=$(mktemp "${TMPDIR:-/tmp}/seed-aplg.XXXXXX")
+  if http_get "$1" "$ap_body"; then
+    cat "$ap_body"
+    rm -f "$ap_body"
+    return 0
+  fi
+  rm -f "$ap_body"
+  [ "$HTTP_CURL" -eq 0 ] || die "agent plugin: network failed (curl=$HTTP_CURL)" 71
+  die "agent plugin: HTTP $HTTP_CODE" 72
 }
 
 # Best-effort GET into dest. 404 / network fail: leave dest, return 1.
 agent_plugin_try() {
-  url=$1
-  dest=$2
-  need curl
-  body=$(mktemp "${TMPDIR:-/tmp}/seed-aptry.XXXXXX")
-  set +e
-  code=$(curl -q -sS --connect-timeout 5 --max-time 30 -o "$body" -w '%{http_code}' "$url")
-  cs=$?
-  set -e
-  if [ "$cs" -eq 0 ]; then
-    case $code in
-      2*) mv "$body" "$dest"; return 0 ;;
-    esac
+  at_body=$(mktemp "${TMPDIR:-/tmp}/seed-aptry.XXXXXX")
+  if http_get "$1" "$at_body"; then
+    mv "$at_body" "$2"
+    return 0
   fi
-  rm -f "$body"
+  rm -f "$at_body"
   return 1
 }
 
@@ -1008,6 +1073,20 @@ agent_run_hooks() {
       *) /bin/sh "$script" || true ;;
     esac
   done
+}
+
+# Print the plugin's ask text once the tree is ready and edition is still
+# unset. The wording lives in the init pack so the seed stays ASCII and
+# does not name any expansion.
+agent_print_ask() {
+  idx=$INSTALL/agent-store/index.json
+  pack=$INSTALL/agent-store/plugins/init.json
+  [ -f "$idx" ] && [ -f "$pack" ] || return 0
+  ed=$(jq -r '.ours.edition // empty' "$idx" 2>/dev/null || true)
+  [ -z "$ed" ] || return 0
+  ask=$(jq -r '.ask // empty' "$pack" 2>/dev/null || true)
+  [ -n "$ask" ] || return 0
+  printf '%s\n' "$ask" >&2
 }
 
 agent_ready() {
@@ -1080,6 +1159,34 @@ agent_check_machine_tree() {
   ' "$f" >/dev/null 2>&1
 }
 
+# Shared fetch: take a catalog body, pull required.init, write both under
+# agent-store. strict=1 demands the full init pack shape (first fetch).
+agent_fetch_pack() {
+  fp_strict=$1
+  fp_index=$2
+  store=$INSTALL/agent-store
+  mkdir -p "$store/plugins"
+  root=$(plugin_root)
+  rel=$(printf '%s' "$fp_index" | jq -r '.required.init // empty')
+  [ -n "$rel" ] || die "agent plugin: catalog has no required.init" 69
+  body=$(agent_plugin_get "$(plugin_join "$root/agent" "$rel")")
+  if [ "$fp_strict" -eq 1 ]; then
+    printf '%s' "$body" | jq -e \
+      'type == "object" and has("prompt") and has("machine_tree") and has("memory_tree")' \
+      >/dev/null 2>&1 || die "agent plugin: init pack invalid" 69
+  else
+    printf '%s' "$body" | jq -e 'has("prompt")' >/dev/null 2>&1 \
+      || die "agent plugin: init pack invalid" 69
+  fi
+  tmpc=$(mktemp "${TMPDIR:-/tmp}/seed-acat.XXXXXX")
+  tmpi=$(mktemp "${TMPDIR:-/tmp}/seed-ainit.XXXXXX")
+  printf '%s\n' "$fp_index" > "$tmpc"
+  printf '%s\n' "$body" > "$tmpi"
+  mv "$tmpi" "$store/plugins/init.json"
+  mv "$tmpc" "$store/catalog.json"
+  agent_fetch_hooks
+}
+
 agent_fetch_required() {
   store=$INSTALL/agent-store
   mkdir -p "$store/plugins"
@@ -1091,17 +1198,7 @@ agent_fetch_required() {
   index=$(agent_plugin_get "$root/agent/index.json")
   printf '%s' "$index" | jq -e 'type == "object"' >/dev/null 2>&1 \
     || die "agent plugin: catalog is not JSON" 69
-  rel=$(printf '%s' "$index" | jq -r '.required.init // empty')
-  [ -n "$rel" ] || die "agent plugin: catalog has no required.init" 69
-  body=$(agent_plugin_get "$(plugin_join "$root/agent" "$rel")")
-  printf '%s' "$body" | jq -e \
-    'type == "object" and has("prompt") and has("machine_tree") and has("memory_tree")' \
-    >/dev/null 2>&1 || die "agent plugin: init pack invalid" 69
-  tmp=$(mktemp "${TMPDIR:-/tmp}/seed-acat.XXXXXX")
-  printf '%s\n' "$index" > "$tmp"
-  printf '%s\n' "$body" > "$store/plugins/init.json"
-  mv "$tmp" "$store/catalog.json"
-  agent_fetch_hooks
+  agent_fetch_pack 1 "$index"
 }
 
 agent_place_trees() {
@@ -1122,6 +1219,52 @@ agent_place_trees() {
   fi
 }
 
+# Deterministic probe: the engine, not the model, fills system.tools
+# (command -v for the path, a cheap smoke for ok). The init conversation
+# only handles the fuzzy rest: web smoke, skills scan, ready flip.
+agent_probe_one() {
+  pt=$1
+  pb=$(command -v "$pt" 2>/dev/null || true)
+  if [ -z "$pb" ]; then
+    jq -nc '{present:false,path:"",ok:false,note:"not found"}'
+    return 0
+  fi
+  pok=false
+  case $pt in
+    sh) "$pb" -c 'echo sh_ok' >/dev/null 2>&1 && pok=true ;;
+    jq) "$pb" -n . >/dev/null 2>&1 && pok=true ;;
+    *) "$pb" --version >/dev/null 2>&1 && pok=true ;;
+  esac
+  jq -nc --arg p "$pb" --argjson ok "$pok" \
+    '{present:true,path:$p,ok:$ok,note:""}'
+}
+
+agent_probe_tools() {
+  f=$INSTALL/agent-store/index.json
+  [ -f "$f" ] || return 0
+  pj=$(mktemp "${TMPDIR:-/tmp}/seed-probe.XXXXXX")
+  {
+    printf '{'
+    sep=
+    for pt in sh curl jq rg git python; do
+      printf '%s"%s":%s' "$sep" "$pt" "$(agent_probe_one "$pt")"
+      sep=,
+    done
+    printf '}\n'
+  } > "$pj"
+  tmp=$(mktemp "${TMPDIR:-/tmp}/seed-probew.XXXXXX")
+  if jq --slurpfile t "$pj" '
+      if (.system? | type) == "object"
+      then .system.tools = $t[0]
+      else . end
+    ' "$f" > "$tmp" 2>/dev/null; then
+    mv "$tmp" "$f"
+  else
+    rm -f "$tmp"
+  fi
+  rm -f "$pj"
+}
+
 agent_run_init() {
   pack=$INSTALL/agent-store/plugins/init.json
   prompt=$(jq -r '.prompt // empty' "$pack")
@@ -1130,13 +1273,10 @@ agent_run_init() {
   sess=$ev/session
   mkdir -p "$ev"
   shell_init "$sess" "$PWD"
-  set +e
   INIT_STOP_WHEN_READY=1
   export INIT_STOP_WHEN_READY
-  run_loop "$(product_system)" "$prompt" "$sess" "$ev" "$AGENT_MAX_ROUNDS" 0
-  as=$?
+  run_loop "$(product_system)" "$prompt" "$sess" "$ev" "$AGENT_MAX_ROUNDS" 0 || :
   unset INIT_STOP_WHEN_READY
-  set -e
   shell_stop "$sess" 2>/dev/null || :
   agent_repair_machine_tree || true
   agent_check_machine_tree && return 0
@@ -1153,6 +1293,7 @@ agent_ensure_init() {
   printf 'initializing:\n' >&2
   agent_fetch_required
   agent_place_trees
+  agent_probe_tools
   SEED_STREAM=1
   SEED_STREAM_PRINT=1
   export SEED_STREAM SEED_STREAM_PRINT
@@ -1180,18 +1321,7 @@ agent_update() {
   if [ "$nv" = "$ov" ] && [ "$nu" = "$ou" ]; then
     return 0
   fi
-  rel=$(printf '%s' "$index" | jq -r '.required.init // empty')
-  [ -n "$rel" ] || die "agent plugin: catalog has no required.init" 69
-  body=$(agent_plugin_get "$(plugin_join "$root/agent" "$rel")")
-  printf '%s' "$body" | jq -e 'has("prompt")' >/dev/null 2>&1 \
-    || die "agent plugin: init pack invalid" 69
-  tmpc=$(mktemp "${TMPDIR:-/tmp}/seed-ucat.XXXXXX")
-  tmpi=$(mktemp "${TMPDIR:-/tmp}/seed-uinit.XXXXXX")
-  printf '%s\n' "$index" > "$tmpc"
-  printf '%s\n' "$body" > "$tmpi"
-  mv "$tmpi" "$store/plugins/init.json"
-  mv "$tmpc" "$store/catalog.json"
-  agent_fetch_hooks
+  agent_fetch_pack 0 "$index"
   if [ -f "$store/index.json" ]; then
     nr=$(jq -r '.machine_tree.system.retrieve // empty' "$store/plugins/init.json")
     if [ -n "$nr" ]; then
@@ -1205,6 +1335,34 @@ agent_update() {
   fi
 }
 
+# Latest finished conversation in this workspace (init runs excluded).
+# Conversation state belongs to the loop, so continuing one must be a
+# loop affordance; wrappers spawn `agent --resume` per human line.
+agent_resume_msgs() {
+  rd=${AGENT_RUNS_DIR:-$PWD/.agent-runs}
+  [ -d "$rd" ] || return 1
+  best=
+  for r in "$rd"/*; do
+    [ -d "$r" ] || continue
+    case $r in
+      *-init) continue ;;
+    esac
+    [ -f "$r/messages.json" ] || continue
+    best=$r/messages.json
+  done
+  [ -n "$best" ] || return 1
+  printf '%s\n' "$best"
+}
+
+agent_main_meta() {
+  rd=${AGENT_RUNS_DIR:-$PWD/.agent-runs}
+  [ -d "$rd" ] || return 1
+  best=
+  for r in "$rd"/*; do
+    case $r in *-init) continue ;; esac
+    [ -d "$r" ] && [ -f "$r/messages.json" ] && best=$r/messages.json
+  done
+}
 agent_main() {
   INSTALL=$(product_root)
   ensure_jq
@@ -1214,6 +1372,25 @@ agent_main() {
   SEED_STREAM=1
   SEED_STREAM_PRINT=1
   export SEED_STREAM SEED_STREAM_PRINT
+  resume=0
+  if [ "${1:-}" = --resume ]; then
+    resume=1; shift
+  fi
+  if [ "${1:-}" = --resume-task ]; then
+    shift
+    resume=1
+    rd=${AGENT_RUNS_DIR:-$PWD/.agent-runs}
+    if [ ! -f "$rd/messages.json" ]; then
+      die "no conversation to resume" 70
+    fi
+    if [ "$#" -eq 0 ]; then
+      # end state: report committed answer and exit (self-terminating)
+      jq -r '.commit // empty' "$rd/messages.json" 2>/dev/null
+      exit 0
+    fi
+    task=$*
+    first=1
+  fi
   oneshot=0
   task=
   if [ "${1:-}" = --oneshot ]; then
@@ -1222,6 +1399,7 @@ agent_main() {
     oneshot=1; task=$*
   fi
   if [ "$oneshot" -eq 0 ]; then
+    [ "$resume" -eq 0 ] && agent_print_ask
     printf '> ' >&2
     if ! IFS= read -r line; then printf '\n' >&2; exit 0; fi
     [ -n "$line" ] || exit 0
@@ -1231,12 +1409,42 @@ agent_main() {
   ev=${AGENT_RUNS_DIR:-$PWD/.agent-runs}/$(date -u +%Y%m%dT%H%M%SZ)-$$-$evn
   sess=$ev/session
   mkdir -p "$ev"
+  if [ "${resume_task:-0}" -eq 1 ]; then
+    rd=${AGENT_RUNS_DIR:-$PWD/.agent-runs}
+    if [ "$first" -eq 1 ]; then
+      [ -f "$rd/committed" ] && mv "$rd/committed" "$ev/committed" 2>/dev/null || :
+      rm -f "$rd/last-pending" 2>/dev/null || :
+    fi
+  fi
+  if [ "$resume" -eq 1 ]; then
+    prev=$(agent_resume_msgs 2>/dev/null || :)
+    if [ -n "$prev" ]; then
+      strip_msg_thinking "$prev" "$ev/messages.json"
+    fi
+  fi
   shell_init "$sess" "$PWD"
-  set +e
-  run_loop "$(product_system)" "$task" "$sess" "$ev" "$AGENT_MAX_ROUNDS" 1
-  as=$?
-  set -e
+  # || capture: run_loop flips errexit internally, so a set +e guard here
+  # would not survive a model error; the window must outlive one bad turn.
+  as=0
+  run_loop "$(product_system)" "$task" "$sess" "$ev" "$AGENT_MAX_ROUNDS" 1 || as=$?
   last_msgs=$ev/messages.json
+  if [ "${resume_task:-0}" -eq 1 ]; then
+    rd=${AGENT_RUNS_DIR:-$PWD/.agent-runs}
+    mkdir -p "$rd"
+    if [ -f "$ev/messages.json" ]; then
+      if [ -f "$ev/committed" ]; then
+        jq -Rsn --arg c "$(cat "$ev/committed" 2>/dev/null || printf '')" \
+          '. + {commit: $c}' "$ev/messages.json" > "$ev/messages.c" 2>/dev/null \
+          && mv "$ev/messages.c" "$ev/messages.json" 2>/dev/null || :
+      fi
+      cp "$ev/messages.json" "$rd/messages.json" 2>/dev/null || :
+    elif [ -f "$ev/committed" ]; then
+      jq -Rsn --arg c "$(cat "$ev/committed" 2>/dev/null || printf '')" \
+        '{commit: $c}' > "$rd/messages.json" 2>/dev/null || :
+    fi
+    shell_stop "$sess" 2>/dev/null || :
+    exit "$as"
+  fi
   if [ "$oneshot" -eq 1 ]; then
     shell_stop "$sess"
     exit "$as"
@@ -1311,4 +1519,21 @@ esac
 mkdir -p "$INSTALL"
 INSTALL=$(CDPATH= cd "$INSTALL" && pwd -P)
 install_main
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 

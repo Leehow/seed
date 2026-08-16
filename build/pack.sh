@@ -19,6 +19,7 @@ need install.sh
 need product.sh
 need agent.sh
 need prompts/product-system.txt
+need prompts/compact-summary.txt
 need prompts/tools.json
 
 emit_quoted() {
@@ -40,6 +41,8 @@ HDR
   cat "$BUILD/env.sh"
   printf '\n'
   emit_quoted cabin_product_system prompts/product-system.txt
+  printf '\n'
+  emit_quoted cabin_compact_summary prompts/compact-summary.txt
   printf '\n'
   emit_quoted tools_json prompts/tools.json
   printf '\n'

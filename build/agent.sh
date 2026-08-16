@@ -1,3 +1,22 @@
+# Latest finished conversation in this workspace (init runs excluded).
+# Conversation state belongs to the loop, so continuing one must be a
+# loop affordance; wrappers spawn `agent --resume` per human line.
+agent_resume_msgs() {
+  rd=${AGENT_RUNS_DIR:-$PWD/.agent-runs}
+  [ -d "$rd" ] || return 1
+  best=
+  for r in "$rd"/*; do
+    [ -d "$r" ] || continue
+    case $r in
+      *-init) continue ;;
+    esac
+    [ -f "$r/messages.json" ] || continue
+    best=$r/messages.json
+  done
+  [ -n "$best" ] || return 1
+  printf '%s\n' "$best"
+}
+
 agent_main() {
   INSTALL=$(product_root)
   ensure_jq
@@ -7,6 +26,10 @@ agent_main() {
   SEED_STREAM=1
   SEED_STREAM_PRINT=1
   export SEED_STREAM SEED_STREAM_PRINT
+  resume=0
+  if [ "${1:-}" = --resume ]; then
+    resume=1; shift
+  fi
   oneshot=0
   task=
   if [ "${1:-}" = --oneshot ]; then
@@ -15,6 +38,7 @@ agent_main() {
     oneshot=1; task=$*
   fi
   if [ "$oneshot" -eq 0 ]; then
+    [ "$resume" -eq 0 ] && agent_print_ask
     printf '> ' >&2
     if ! IFS= read -r line; then printf '\n' >&2; exit 0; fi
     [ -n "$line" ] || exit 0
@@ -24,11 +48,17 @@ agent_main() {
   ev=${AGENT_RUNS_DIR:-$PWD/.agent-runs}/$(date -u +%Y%m%dT%H%M%SZ)-$$-$evn
   sess=$ev/session
   mkdir -p "$ev"
+  if [ "$resume" -eq 1 ]; then
+    prev=$(agent_resume_msgs 2>/dev/null || :)
+    if [ -n "$prev" ]; then
+      strip_msg_thinking "$prev" "$ev/messages.json"
+    fi
+  fi
   shell_init "$sess" "$PWD"
-  set +e
-  run_loop "$(product_system)" "$task" "$sess" "$ev" "$AGENT_MAX_ROUNDS" 1
-  as=$?
-  set -e
+  # || capture: run_loop flips errexit internally, so a set +e guard here
+  # would not survive a model error; the window must outlive one bad turn.
+  as=0
+  run_loop "$(product_system)" "$task" "$sess" "$ev" "$AGENT_MAX_ROUNDS" 1 || as=$?
   last_msgs=$ev/messages.json
   if [ "$oneshot" -eq 1 ]; then
     shell_stop "$sess"

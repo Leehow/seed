@@ -106,7 +106,10 @@ ensure_jq() {
   command -v jq >/dev/null 2>&1 || die "need jq" 69
 }
 
+# DeepSeek-only request field. Other channels keep their catalog extra
+# untouched; unknown fields can 400 on OpenAI-compatible endpoints.
 disable_thinking() {
+  [ "${LLM_PROVIDER:-}" = deepseek ] || return 0
   extra=${LLM_EXTRA:-'{}'}
   LLM_EXTRA=$(printf '%s' "$extra" | jq -c '. + {"thinking":{"type":"disabled"}}')
 }
@@ -157,25 +160,40 @@ plugin_join() {
   esac
 }
 
-plugin_get() {
-  url=$1
-  auth=${2:-}
+# One GET for every plugin fetch. Body lands in dest; HTTP_CODE and
+# HTTP_CURL carry the outcome. Returns 0 only on curl ok + HTTP 2xx.
+http_get() {
+  hg_url=$1
+  hg_dest=$2
+  hg_auth=${3:-}
   need curl
-  body=$(mktemp "${TMPDIR:-/tmp}/seed-plug.XXXXXX")
   set +e
-  if [ -n "$auth" ]; then
-    code=$(curl -q -sS --connect-timeout 5 --max-time 30 \
-      -H "Authorization: Bearer $auth" -o "$body" -w '%{http_code}' "$url")
+  if [ -n "$hg_auth" ]; then
+    HTTP_CODE=$(curl -q -sS --connect-timeout 5 --max-time 30 \
+      -H "Authorization: Bearer $hg_auth" -o "$hg_dest" -w '%{http_code}' "$hg_url")
   else
-    code=$(curl -q -sS --connect-timeout 5 --max-time 30 -o "$body" -w '%{http_code}' "$url")
+    HTTP_CODE=$(curl -q -sS --connect-timeout 5 --max-time 30 \
+      -o "$hg_dest" -w '%{http_code}' "$hg_url")
   fi
-  cs=$?
+  HTTP_CURL=$?
   set -e
-  [ "$cs" -eq 0 ] || { rm -f "$body"; die "plugin: network failed (curl=$cs)" 71; }
-  case $code in
-    2*) cat "$body"; rm -f "$body" ;;
-    *) rm -f "$body"; die "plugin: HTTP $code" 72 ;;
+  [ "$HTTP_CURL" -eq 0 ] || return 1
+  case $HTTP_CODE in
+    2*) return 0 ;;
   esac
+  return 1
+}
+
+plugin_get() {
+  pg_body=$(mktemp "${TMPDIR:-/tmp}/seed-plug.XXXXXX")
+  if http_get "$1" "$pg_body" "${2:-}"; then
+    cat "$pg_body"
+    rm -f "$pg_body"
+    return 0
+  fi
+  rm -f "$pg_body"
+  [ "$HTTP_CURL" -eq 0 ] || die "plugin: network failed (curl=$HTTP_CURL)" 71
+  die "plugin: HTTP $HTTP_CODE" 72
 }
 
 api_origin() {

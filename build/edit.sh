@@ -5,7 +5,9 @@ edit_main() {
   [ -n "$old" ] || { printf 'edit: old_text is empty\n' >&2; return 2; }
   [ -f "$path" ] || { printf 'edit: cannot read %s\n' "$path" >&2; return 66; }
   tmp=$(mktemp "${TMPDIR:-/tmp}/seed-edit.XXXXXX")
-  set +e
+  # || capture, not set +e/-e: re-enabling errexit here would undo the
+  # loop's guard, so one bad edit would kill the whole agent.
+  es=0
   jq -nr --rawfile t "$path" --arg old "$old" --arg new "$new" '
     ($t | split($old)) as $p
     | if ($p | length) != 2 then
@@ -13,9 +15,7 @@ edit_main() {
       else
         $p[0] + $new + $p[1]
       end
-  ' > "$tmp"
-  es=$?
-  set -e
+  ' > "$tmp" || es=$?
   if [ "$es" -ne 0 ]; then
     rm -f "$tmp"
     return "$es"
