@@ -1,7 +1,7 @@
 product_root() {
   case $SELF in
     */bin/agent) CDPATH= cd "$(dirname "$SELF")/.." && pwd -P ;;
-    */bin/seed-agent)
+    */bin/seedagent)
       # Global entry on PATH: state home is separate from the entry dir.
       pr=${SEED_AGENT_HOME:-$HOME/.seed-agent}
       mkdir -p "$pr"

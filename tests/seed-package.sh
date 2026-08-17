@@ -43,10 +43,11 @@ else
   printf 'FAIL product replies in the human language\n'; fail=$((fail + 1))
 fi
 if grep -q 'Model:' "$BUILD/product.sh" \
-  && grep -A8 'agent_ensure_init' "$BUILD/agent.sh" | grep -q 'SEED_STREAM_PRINT=1'; then
-  printf 'ok   product names model and restores SSE after init\n'
+  && grep -A8 'agent_ensure_init' "$BUILD/agent.sh" | grep -q 'SEED_STREAM_PRINT=0' \
+  && grep -B2 -A6 'agent_run_init' "$BUILD/product.sh" | grep -q 'SEED_STREAM_PRINT=1'; then
+  printf 'ok   SSE echo only during init, final prints once\n'
 else
-  printf 'FAIL product names model and restores SSE after init\n'; fail=$((fail + 1))
+  printf 'FAIL SSE echo only during init, final prints once\n'; fail=$((fail + 1))
 fi
 if jq -e '.machine_tree.system.retrieve | type=="string" and length>20' \
   "$ROOT/plugins/agent/init.json" >/dev/null 2>&1 \
@@ -114,10 +115,10 @@ else
   printf 'FAIL compact summarizes then prunes\n'; fail=$((fail + 1))
 fi
 if grep -q -- '--global' "$BUILD/agent.sh" \
-  && grep -q '.local/bin/seed-agent' "$BUILD/install.sh" \
+  && grep -q '.local/bin/seedagent' "$BUILD/install.sh" \
   && grep -q 'SEED_AGENT_HOME' "$BUILD/product.sh" \
   && grep -q '"${1:-}" = -p' "$BUILD/agent.sh" \
-  && grep -q 'oneshot: seed-agent -p' "$BUILD/install.sh" \
+  && grep -q 'oneshot: seedagent -p' "$BUILD/install.sh" \
   && grep -q 'Never read .env' "$BUILD/prompts/product-system.txt"; then
   printf 'ok   global install wiring\n'
 else
@@ -589,7 +590,7 @@ else
 fi
 ck "agent exits on EOF" true
 
-# global install into a fake HOME: entry ~/.local/bin/seed-agent, home ~/.seed-agent
+# global install into a fake HOME: entry ~/.local/bin/seedagent, home ~/.seed-agent
 gh=$d/ghome
 gc=$d/gcwd
 mkdir -p "$gh" "$gc"
@@ -597,15 +598,15 @@ mkdir -p "$gh" "$gc"
   cd "$gc"
   HOME=$gh /bin/sh "$SEED" --global deepseek sk-TESTKEYNOTREAL
 ) > "$d/g.out" 2> "$d/g.err" || true
-ck "global entry installed" test -x "$gh/.local/bin/seed-agent"
-ck "global entry syntax" /bin/sh -n "$gh/.local/bin/seed-agent"
+ck "global entry installed" test -x "$gh/.local/bin/seedagent"
+ck "global entry syntax" /bin/sh -n "$gh/.local/bin/seedagent"
 ck "global home has .env with key" grep -q '^LLM_API_KEY=sk-TESTKEYNOTREAL' "$gh/.seed-agent/.env"
 ck "global install left cwd alone" test ! -e "$gc/.env"
 ck "global home bin/agent" test -x "$gh/.seed-agent/bin/agent"
-if grep -q 'oneshot: seed-agent -p' "$d/g.err" && grep -q 'installed:' "$d/g.err"; then
-  printf 'ok   global install tells seed-agent and -p\n'
+if grep -q 'oneshot: seedagent -p' "$d/g.err" && grep -q 'installed:' "$d/g.err"; then
+  printf 'ok   global install tells seedagent and -p\n'
 else
-  printf 'FAIL global install tells seed-agent and -p\n'; fail=$((fail + 1))
+  printf 'FAIL global install tells seedagent and -p\n'; fail=$((fail + 1))
 fi
 if [ -d "$gh/.seed-agent/agent-store" ] && [ ! -e "$gh/.local/agent-store" ]; then
   printf 'ok   global home holds state, not the entry dir\n'
@@ -1400,6 +1401,53 @@ EOF
     printf 'ok   masked env: blacklist honest, whitelist callable\n'
   else
     printf 'FAIL masked env: blacklist honest, whitelist callable\n'; fail=$((fail + 1))
+  fi
+
+  # SSE conversation: the final answer prints exactly once, no live echo
+  mkdir -p "$d/sse"
+  cat > "$d/sse/turn.sse" <<'EOF'
+data: {"choices":[{"delta":{"content":"final-once"}}]}
+
+data: {"choices":[{"delta":{"content":"-marker"}}]}
+
+data: {"choices":[{"delta":{}}],"usage":{"prompt_tokens":3,"completion_tokens":2}}
+
+data: [DONE]
+EOF
+  cat > "$d/sse/sse_server.py" <<'EOF'
+import http.server, sys
+class H(http.server.BaseHTTPRequestHandler):
+    def _serve(self):
+        n = int(self.headers.get('Content-Length') or 0); self.rfile.read(n)
+        with open(sys.argv[2], 'rb') as f: body = f.read()
+        self.send_response(200)
+        self.send_header('Content-Length', str(len(body)))
+        self.end_headers(); self.wfile.write(body)
+    do_POST = _serve
+    do_GET = _serve
+    def log_message(self, *a): pass
+http.server.HTTPServer(('127.0.0.1', int(sys.argv[1])), H).serve_forever()
+EOF
+  PORT3=$(python3 -c 'import socket;s=socket.socket();s.bind(("127.0.0.1",0));print(s.getsockname()[1]);s.close()')
+  python3 "$d/sse/sse_server.py" "$PORT3" "$d/sse/turn.sse" >/dev/null 2>&1 &
+  SSE_PID=$!
+  i=0
+  while [ "$i" -lt 30 ]; do
+    curl -sS -o /dev/null "http://127.0.0.1:$PORT3/turn.sse" 2>/dev/null && break
+    i=$((i + 1)); sleep 0.1
+  done
+  (
+    cd "$d"
+    printf '看一眼\n' | LLM_API_KEY=x LLM_PROVIDER=custom LLM_MODEL=m \
+      LLM_API_URL="http://127.0.0.1:$PORT3/turn.sse" \
+      SLAB_SKIP_INIT=1 /bin/sh "$cwd/bin/agent"
+  ) > "$d/sse.out" 2> "$d/sse.err" || true
+  kill "$SSE_PID" 2>/dev/null || true
+  if [ "$(grep -c 'final-once-marker' "$d/sse.out")" -eq 1 ] \
+    && ! grep -q 'final-once-marker' "$d/sse.err"; then
+    printf 'ok   streamed answer prints exactly once\n'
+  else
+    printf 'FAIL streamed answer prints exactly once\n'; fail=$((fail + 1))
   fi
 
   # model wrote ready + skills at the top level, dropped version/ours:

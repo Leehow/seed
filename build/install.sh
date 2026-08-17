@@ -84,11 +84,12 @@ install_main() {
   verify_install
   printf 'installed: bin/agent\n' >&2
   printf 'open: sh bin/agent\n' >&2
-  printf 'global: sh seed.sh --global   # install ~/.local/bin/seed-agent for anywhere use\n' >&2
+  printf 'global: sh seed.sh --global   # install ~/.local/bin/seedagent for anywhere use\n' >&2
 }
 
-# Global mode: entry on PATH (~/.local/bin/slab); state home is separate
-# ($SLAB_HOME or ~/.slab: agent-store, .env, jq). Workspace stays launch cwd.
+# Global mode: entry on PATH (~/.local/bin/seedagent); state home is separate
+# ($SEED_AGENT_HOME or ~/.seed-agent: agent-store, .env, jq). Workspace stays
+# the launch cwd.
 install_global_main() {
   GH=${SEED_AGENT_HOME:-$HOME/.seed-agent}
   GB=$HOME/.local/bin
@@ -98,14 +99,14 @@ install_global_main() {
   write_env_file "$GH/.env"
   ensure_gitignore "$GH"
   write_shims
-  cp "$SELF" "$GB/seed-agent"
-  chmod 755 "$GB/seed-agent"
+  cp "$SELF" "$GB/seedagent"
+  chmod 755 "$GB/seedagent"
   verify_global_install
-  printf 'installed: %s\n' "$GB/seed-agent" >&2
-  printf 'open: seed-agent\n' >&2
-  printf 'oneshot: seed-agent -p "task"\n' >&2
-  command -v seed-agent >/dev/null 2>&1 || \
-    printf 'note: %s is not on PATH; add it to use seed-agent anywhere\n' "$GB" >&2
+  printf 'installed: %s\n' "$GB/seedagent" >&2
+  printf 'open: seedagent\n' >&2
+  printf 'oneshot: seedagent -p "task"\n' >&2
+  command -v seedagent >/dev/null 2>&1 || \
+    printf 'note: %s is not on PATH; add it to use seedagent anywhere\n' "$GB" >&2
 }
 
 verify_global_install() {
@@ -118,7 +119,7 @@ verify_global_install() {
       printf '  FAIL %s failed syntax check\n' "$p" >&2; bad=$((bad + 1))
     fi
   done
-  p=$HOME/.local/bin/seed-agent
+  p=$HOME/.local/bin/seedagent
   if [ ! -x "$p" ]; then
     printf '  FAIL missing %s\n' "$p" >&2; bad=$((bad + 1))
   elif ! /bin/sh -n "$p" 2>/dev/null; then
@@ -134,7 +135,7 @@ verify_global_install() {
   intro=$(LAUNCH_CWD=$LAUNCH_CWD SLAB_SKIP_INIT=1 /bin/sh "$INSTALL/bin/agent" </dev/null 2>&1 || true)
   printf '%s' "$intro" | grep -q '>' || { printf '  FAIL agent prompt missing\n' >&2; bad=$((bad + 1)); }
   baked=$(printf '/%s/|/%s/' Users home)
-  if grep -E "$baked" "$INSTALL/bin/agent" "$HOME/.local/bin/seed-agent" >/dev/null 2>&1; then
+  if grep -E "$baked" "$INSTALL/bin/agent" "$HOME/.local/bin/seedagent" >/dev/null 2>&1; then
     printf '  FAIL shim baked a host path\n' >&2; bad=$((bad + 1))
   fi
   w=$(mktemp -d "${TMPDIR:-/tmp}/seed-ver.XXXXXX")
@@ -156,7 +157,7 @@ STUB
   set +e
   (
     cd "$w"
-    SLAB_SKIP_INIT=1 SEED_LLM_STUB=$stub SEED_VER_N=$w/n /bin/sh "$HOME/.local/bin/seed-agent" --oneshot 'pwd'
+    SLAB_SKIP_INIT=1 SEED_LLM_STUB=$stub SEED_VER_N=$w/n /bin/sh "$HOME/.local/bin/seedagent" --oneshot 'pwd'
   ) > "$w/out" 2> "$w/err"
   set -e
   if ! grep -q ok "$w/out"; then

@@ -23,8 +23,10 @@ agent_main() {
   load_env
   disable_thinking
   agent_ensure_init
+  # Conversation prints the final answer once. Live delta echo stays off
+  # here; init turns it on for its own ceremony inside agent_ensure_init.
   SEED_STREAM=1
-  SEED_STREAM_PRINT=1
+  SEED_STREAM_PRINT=0
   export SEED_STREAM SEED_STREAM_PRINT
   resume=0
   if [ "${1:-}" = --resume ]; then
@@ -111,7 +113,7 @@ case ${1:-} in
 esac
 
 case $(basename "$0") in
-  agent|seed-agent)
+  agent|seedagent)
     agent_main "$@"
     exit 0 ;;
 esac

@@ -8,7 +8,7 @@
 
 资源索引（探测-登记-使用）成了必选 init 的基础能力后，「简单 / 完整」的 fork 失去存在理由：能力不靠选边长，靠索引按需长。用户拍板：构建一次成 bin/agent 就行，不再问。
 
-同时全局命令定名 `seed-agent`（`~/.local/bin/seed-agent`，家 `~/.seed-agent`）——edition 概念退场后，这个名字归还给产品本身。注意：当年砍掉的只是 `bin/seed-agent` 这个 **TUI 启动器程序**（第二个程序），不是这个名字。
+同时全局命令定名 `seedagent`（`~/.local/bin/seedagent`，家 `~/.seed-agent`）——edition 概念退场后，这个名字归还给产品本身。注意：当年砍掉的只是 `bin/seed-agent` 这个 **TUI 启动器程序**（第二个程序），不是这个名字。
 
 ## 2. 退了什么
 

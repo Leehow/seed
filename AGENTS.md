@@ -83,7 +83,7 @@ build/
 
 ```sh
 sh seed.sh deepseek sk-xxxx    # 装到当前目录，写 .env
-sh seed.sh --global deepseek sk-xxxx   # 装到全局：~/.local/bin/seed-agent，家 ~/.seed-agent
+sh seed.sh --global deepseek sk-xxxx   # 装到全局：~/.local/bin/seedagent，家 ~/.seed-agent
 sh plugins/serve.sh            # 本地 plugin 根 http://127.0.0.1:7432
 sh seed.sh qwen sk-xxxx        # 非内置渠道：拉 seed/index.json → models → 选一次
 sh bin/agent                   # 交互；工作区是当前目录
