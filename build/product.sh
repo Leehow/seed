@@ -1,6 +1,11 @@
 product_root() {
   case $SELF in
     */bin/agent) CDPATH= cd "$(dirname "$SELF")/.." && pwd -P ;;
+    */bin/seed-agent)
+      # Global entry on PATH: state home is separate from the entry dir.
+      pr=${SEED_AGENT_HOME:-$HOME/.seed-agent}
+      mkdir -p "$pr"
+      CDPATH= cd "$pr" && pwd -P ;;
     *) CDPATH= cd "$(dirname "$SELF")" && pwd -P ;;
   esac
 }
@@ -32,14 +37,21 @@ skill_catalog() {
 }
 
 # Two lines of ready state from the Machine index so plain tasks do not
-# burn a round on jq-reading it: the edition choice and which tools are ok.
+# burn a round on jq-reading it: which tools are ok.
 agent_state_lines() {
   sf=$INSTALL/agent-store/index.json
   [ -f "$sf" ] || return 0
   jq -r '
-    "Edition: " + (.ours.edition // "unset"),
     "Tools ok: " + ([.system.tools // {} | to_entries[]
-      | select(.value.ok == true) | .key] | join(" "))
+      | select(.value.ok == true) | .key] | join(" ")),
+    "Blocks: " + (
+      (["skills","commands","models","plugins","delegate"]
+        - [(.ours.seed_agent // {}) | to_entries[]
+           | select(.value == "done") | .key]) as $missing
+      | if ($missing | length) == 0 then "all built"
+        else "missing " + ($missing | join(" "))
+          + " - build a block only when the task needs it, per system.retrieve"
+        end)
   ' "$sf" 2>/dev/null || true
 }
 
@@ -114,20 +126,6 @@ agent_run_hooks() {
       *) /bin/sh "$script" || true ;;
     esac
   done
-}
-
-# Print the plugin's ask text once the tree is ready and edition is still
-# unset. The wording lives in the init pack so the seed stays ASCII and
-# does not name any expansion.
-agent_print_ask() {
-  idx=$INSTALL/agent-store/index.json
-  pack=$INSTALL/agent-store/plugins/init.json
-  [ -f "$idx" ] && [ -f "$pack" ] || return 0
-  ed=$(jq -r '.ours.edition // empty' "$idx" 2>/dev/null || true)
-  [ -z "$ed" ] || return 0
-  ask=$(jq -r '.ask // empty' "$pack" 2>/dev/null || true)
-  [ -n "$ask" ] || return 0
-  printf '%s\n' "$ask" >&2
 }
 
 agent_ready() {

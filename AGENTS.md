@@ -17,7 +17,7 @@ slab 是一个实验：**POSIX `/bin/sh` 能不能撑住一个带工具的 codin
 3. **工作区 = 启动 `bin/agent` 时的 `$PWD`。** 禁止把 `/Users/`、`/home/` 或任何本机绝对路径写进产物。
 4. **一份 POSIX 种子，跟宿主 `$SHELL` 走。** 不要为 Mac / Linux 维护两套，不要假设 Bash 5，不要用 `sed -i`、`head -c`、`pgrep`、`timeout(1)`。
 5. **外壳拥有循环。** 不要改成「每条任务让模型写一段 controller 再自己调 llm」。
-6. **种子对人零交互。** 安装不叫模型。状态和错误用英文机器话（`error:`、`installed:`）。产物第一次打开先 `initializing:`，就绪后若尚未选择 edition，打印 plugin 的 `ask`（中文选项），再是 `>`。对话仍只显示用户输入和最后回答。
+6. **种子对人零交互。** 安装不叫模型。状态和错误用英文机器话（`error:`、`installed:`）。产物第一次打开先 `initializing:`，就绪后直接 `>`；首个交互轮按需构建提示词包（资源索引、命令表等），没有 edition 选择。对话仍只显示用户输入和最后回答。
 7. **不信模型口头说装好了。** 种子自己看磁盘验收。安装只写文件、写 shim、验磁盘。
 8. **之后不限制语言。** 模型在工作区里写什么都行。那是产物在干活，不是外壳作弊。
 9. **增量开发。** 只往上加。已经有的功能、可见行为（包括初始化/对话 SSE）默认留下。要拿掉或换成更“干净”的替代，必须先问人，点头再改。修 bug 靠补，不靠删。
@@ -83,6 +83,7 @@ build/
 
 ```sh
 sh seed.sh deepseek sk-xxxx    # 装到当前目录，写 .env
+sh seed.sh --global deepseek sk-xxxx   # 装到全局：~/.local/bin/seed-agent，家 ~/.seed-agent
 sh plugins/serve.sh            # 本地 plugin 根 http://127.0.0.1:7432
 sh seed.sh qwen sk-xxxx        # 非内置渠道：拉 seed/index.json → models → 选一次
 sh bin/agent                   # 交互；工作区是当前目录

@@ -32,13 +32,12 @@ agent_main() {
   fi
   oneshot=0
   task=
-  if [ "${1:-}" = --oneshot ]; then
+  if [ "${1:-}" = --oneshot ] || [ "${1:-}" = -p ]; then
     oneshot=1; shift; task=$*
   elif [ "$#" -ge 1 ]; then
     oneshot=1; task=$*
   fi
   if [ "$oneshot" -eq 0 ]; then
-    [ "$resume" -eq 0 ] && agent_print_ask
     printf '> ' >&2
     if ! IFS= read -r line; then printf '\n' >&2; exit 0; fi
     [ -n "$line" ] || exit 0
@@ -111,11 +110,14 @@ case ${1:-} in
   -h|--help) usage; exit 0 ;;
 esac
 
-if [ "$(basename "$0")" = agent ]; then
-  agent_main "$@"
-  exit 0
-fi
+case $(basename "$0") in
+  agent|seed-agent)
+    agent_main "$@"
+    exit 0 ;;
+esac
 
+GLOBAL=0
+if [ "${1:-}" = --global ]; then GLOBAL=1; shift; fi
 INSTALL=.
 case ${1:-} in
   '')

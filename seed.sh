@@ -14,7 +14,7 @@ LAUNCH_CWD=$(pwd -P)
 die() { printf 'error: %s\n' "$1" >&2; exit "${2:-70}"; }
 
 usage() {
-  printf 'usage: sh seed.sh deepseek <API_KEY>\n' >&2
+  printf 'usage: sh seed.sh [--global] deepseek <API_KEY>\n' >&2
 }
 
 need() {
@@ -292,10 +292,13 @@ cabin_product_system() {
 You are a coding agent. You have exactly two tools via tool_calls: shell (a persistent login shell) and edit (unique string replace in a file).
 The workspace is the current directory at launch. Look before you edit. After edits, check your work with shell.
 Keep large outputs out of this conversation: redirect them to files and query with grep, jq, or head instead of re-reading whole dumps.
+When you create new project artifacts on your own initiative, put them under project/<task-slug>/ in the workspace, not loose in the workspace root. If the human names a path, or the workspace already has its own layout, follow that instead.
+Never read .env or any credentials file. Never put API keys into commands, files, or messages; delegated children load credentials from .env themselves.
 The task is the human's last message. Do not replace it with Machine index key names.
 Before acting, read the Machine index with shell (jq, not cat of the whole file) and follow system.retrieve.
 The index is a helper catalog, not the problem. jq it for ok matches; do not rewrite the human's ask into index key names.
 When the human asks about skills or SKILL.md, open https://agentskills.io/specification with shell first.
+When the human's message starts with /, it is a slash command, not a coding task: follow system.retrieve and build the commands block first if the table is missing.
 When the human asks what tools you have, what you can use, or what was indexed: first jq the Machine index. Then list (1) the two API tools shell and edit, (2) every ok entry that system.retrieve tells you to use. Mention present-but-not-ok items separately. Do not answer with only shell and edit. Do not dump the raw index.
 Reply in the same language the human just used.
 Do not stream your process to the human. When the task is done, reply with a short final answer and no tool_calls.
@@ -527,7 +530,12 @@ parse_stream() {
 }
 
 stream_print() {
+  # Dual duty: archive every raw line (no tee dependency) and optionally
+  # print delta content to stderr. $1 is the raw capture file.
+  sp_raw=$1
+  : > "$sp_raw"
   while IFS= read -r line || [ -n "$line" ]; do
+    printf '%s\n' "$line" >> "$sp_raw"
     line=$(printf '%s' "$line" | tr -d '\r')
     case $line in
       data:\ \[DONE\]) ;;
@@ -590,7 +598,7 @@ model_turn() {
       curl -q -N -sS --connect-timeout 15 --max-time "$HTTP_TIMEOUT" -X POST \
         -H "@$work/h" --data-binary "@$work/req.json" \
         -w '\n__HTTP__%{http_code}\n' "$LLM_API_URL" \
-        | tee "$work/raw" | stream_print || :
+        | stream_print "$work/raw" || :
       [ -s "$work/raw" ] || cs=1
     else
       curl -q -sS --connect-timeout 15 --max-time "$HTTP_TIMEOUT" -X POST \
@@ -1010,6 +1018,7 @@ STUB
 }
 
 install_main() {
+  if [ "${GLOBAL:-0}" = 1 ]; then install_global_main; return 0; fi
   ensure_jq
   write_env_file "$LAUNCH_CWD/.env"
   write_env_file "$INSTALL/.env"
@@ -1018,11 +1027,102 @@ install_main() {
   verify_install
   printf 'installed: bin/agent\n' >&2
   printf 'open: sh bin/agent\n' >&2
+  printf 'global: sh seed.sh --global   # install ~/.local/bin/seed-agent for anywhere use\n' >&2
+}
+
+# Global mode: entry on PATH (~/.local/bin/slab); state home is separate
+# ($SLAB_HOME or ~/.slab: agent-store, .env, jq). Workspace stays launch cwd.
+install_global_main() {
+  GH=${SEED_AGENT_HOME:-$HOME/.seed-agent}
+  GB=$HOME/.local/bin
+  INSTALL=$GH
+  ensure_jq
+  mkdir -p "$GH/bin" "$GB"
+  write_env_file "$GH/.env"
+  ensure_gitignore "$GH"
+  write_shims
+  cp "$SELF" "$GB/seed-agent"
+  chmod 755 "$GB/seed-agent"
+  verify_global_install
+  printf 'installed: %s\n' "$GB/seed-agent" >&2
+  printf 'open: seed-agent\n' >&2
+  printf 'oneshot: seed-agent -p "task"\n' >&2
+  command -v seed-agent >/dev/null 2>&1 || \
+    printf 'note: %s is not on PATH; add it to use seed-agent anywhere\n' "$GB" >&2
+}
+
+verify_global_install() {
+  bad=0
+  for f in agent llm edit shell; do
+    p=$INSTALL/bin/$f
+    if [ ! -x "$p" ]; then
+      printf '  FAIL missing %s\n' "$p" >&2; bad=$((bad + 1))
+    elif ! /bin/sh -n "$p" 2>/dev/null; then
+      printf '  FAIL %s failed syntax check\n' "$p" >&2; bad=$((bad + 1))
+    fi
+  done
+  p=$HOME/.local/bin/seed-agent
+  if [ ! -x "$p" ]; then
+    printf '  FAIL missing %s\n' "$p" >&2; bad=$((bad + 1))
+  elif ! /bin/sh -n "$p" 2>/dev/null; then
+    printf '  FAIL %s failed syntax check\n' "$p" >&2; bad=$((bad + 1))
+  fi
+  [ -f "$INSTALL/seed.sh" ] || { printf '  FAIL missing seed.sh\n' >&2; bad=$((bad + 1)); }
+  if [ ! -f "$INSTALL/.env" ]; then
+    printf '  FAIL incomplete .env\n' >&2; bad=$((bad + 1))
+  else
+    k1=$(grep '^LLM_API_KEY=' "$INSTALL/.env" | sed 's/^LLM_API_KEY=//')
+    [ -n "$k1" ] || { printf '  FAIL .env has no key\n' >&2; bad=$((bad + 1)); }
+  fi
+  intro=$(LAUNCH_CWD=$LAUNCH_CWD SLAB_SKIP_INIT=1 /bin/sh "$INSTALL/bin/agent" </dev/null 2>&1 || true)
+  printf '%s' "$intro" | grep -q '>' || { printf '  FAIL agent prompt missing\n' >&2; bad=$((bad + 1)); }
+  baked=$(printf '/%s/|/%s/' Users home)
+  if grep -E "$baked" "$INSTALL/bin/agent" "$HOME/.local/bin/seed-agent" >/dev/null 2>&1; then
+    printf '  FAIL shim baked a host path\n' >&2; bad=$((bad + 1))
+  fi
+  w=$(mktemp -d "${TMPDIR:-/tmp}/seed-ver.XXXXXX")
+  w=$(CDPATH= cd "$w" && pwd)
+  stub=$w/stub
+  printf '0\n' > "$w/n"
+  cat > "$stub" <<'STUB'
+#!/bin/sh
+n=$(cat "$SEED_VER_N")
+n=$((n + 1))
+printf '%s\n' "$n" > "$SEED_VER_N"
+if [ "$n" -eq 1 ]; then
+  printf '%s\n' '{"content":"","tool_calls":[{"id":"v1","name":"shell","arguments":"{\"command\":\"pwd\"}"}],"usage":{"prompt_tokens":1,"completion_tokens":1}}'
+else
+  printf '%s\n' '{"content":"ok","tool_calls":[],"usage":{"prompt_tokens":1,"completion_tokens":1}}'
+fi
+STUB
+  chmod +x "$stub"
+  set +e
+  (
+    cd "$w"
+    SLAB_SKIP_INIT=1 SEED_LLM_STUB=$stub SEED_VER_N=$w/n /bin/sh "$HOME/.local/bin/seed-agent" --oneshot 'pwd'
+  ) > "$w/out" 2> "$w/err"
+  set -e
+  if ! grep -q ok "$w/out"; then
+    printf '  FAIL stub tool_calls did not run\n' >&2; bad=$((bad + 1))
+  fi
+  if ! grep -FR "$w" "$w/.agent-runs" >/dev/null 2>&1; then
+    printf '  FAIL stub workspace was not the temp dir\n' >&2; bad=$((bad + 1))
+  fi
+  # home separation: state under the home, never next to the entry
+  [ -d "$INSTALL/agent-store" ] || { printf '  FAIL agent-store not under home\n' >&2; bad=$((bad + 1)); }
+  [ ! -e "$HOME/.local/agent-store" ] || { printf '  FAIL state leaked next to entry\n' >&2; bad=$((bad + 1)); }
+  rm -rf "$w"
+  [ "$bad" -eq 0 ] || die "verify failed: $bad check(s)" 76
 }
 
 product_root() {
   case $SELF in
     */bin/agent) CDPATH= cd "$(dirname "$SELF")/.." && pwd -P ;;
+    */bin/seed-agent)
+      # Global entry on PATH: state home is separate from the entry dir.
+      pr=${SEED_AGENT_HOME:-$HOME/.seed-agent}
+      mkdir -p "$pr"
+      CDPATH= cd "$pr" && pwd -P ;;
     *) CDPATH= cd "$(dirname "$SELF")" && pwd -P ;;
   esac
 }
@@ -1054,14 +1154,21 @@ skill_catalog() {
 }
 
 # Two lines of ready state from the Machine index so plain tasks do not
-# burn a round on jq-reading it: the edition choice and which tools are ok.
+# burn a round on jq-reading it: which tools are ok.
 agent_state_lines() {
   sf=$INSTALL/agent-store/index.json
   [ -f "$sf" ] || return 0
   jq -r '
-    "Edition: " + (.ours.edition // "unset"),
     "Tools ok: " + ([.system.tools // {} | to_entries[]
-      | select(.value.ok == true) | .key] | join(" "))
+      | select(.value.ok == true) | .key] | join(" ")),
+    "Blocks: " + (
+      (["skills","commands","models","plugins","delegate"]
+        - [(.ours.seed_agent // {}) | to_entries[]
+           | select(.value == "done") | .key]) as $missing
+      | if ($missing | length) == 0 then "all built"
+        else "missing " + ($missing | join(" "))
+          + " - build a block only when the task needs it, per system.retrieve"
+        end)
   ' "$sf" 2>/dev/null || true
 }
 
@@ -1136,20 +1243,6 @@ agent_run_hooks() {
       *) /bin/sh "$script" || true ;;
     esac
   done
-}
-
-# Print the plugin's ask text once the tree is ready and edition is still
-# unset. The wording lives in the init pack so the seed stays ASCII and
-# does not name any expansion.
-agent_print_ask() {
-  idx=$INSTALL/agent-store/index.json
-  pack=$INSTALL/agent-store/plugins/init.json
-  [ -f "$idx" ] && [ -f "$pack" ] || return 0
-  ed=$(jq -r '.ours.edition // empty' "$idx" 2>/dev/null || true)
-  [ -z "$ed" ] || return 0
-  ask=$(jq -r '.ask // empty' "$pack" 2>/dev/null || true)
-  [ -n "$ask" ] || return 0
-  printf '%s\n' "$ask" >&2
 }
 
 agent_ready() {
@@ -1432,13 +1525,12 @@ agent_main() {
   fi
   oneshot=0
   task=
-  if [ "${1:-}" = --oneshot ]; then
+  if [ "${1:-}" = --oneshot ] || [ "${1:-}" = -p ]; then
     oneshot=1; shift; task=$*
   elif [ "$#" -ge 1 ]; then
     oneshot=1; task=$*
   fi
   if [ "$oneshot" -eq 0 ]; then
-    [ "$resume" -eq 0 ] && agent_print_ask
     printf '> ' >&2
     if ! IFS= read -r line; then printf '\n' >&2; exit 0; fi
     [ -n "$line" ] || exit 0
@@ -1511,11 +1603,14 @@ case ${1:-} in
   -h|--help) usage; exit 0 ;;
 esac
 
-if [ "$(basename "$0")" = agent ]; then
-  agent_main "$@"
-  exit 0
-fi
+case $(basename "$0") in
+  agent|seed-agent)
+    agent_main "$@"
+    exit 0 ;;
+esac
 
+GLOBAL=0
+if [ "${1:-}" = --global ]; then GLOBAL=1; shift; fi
 INSTALL=.
 case ${1:-} in
   '')

@@ -8,7 +8,7 @@ LAUNCH_CWD=$(pwd -P)
 die() { printf 'error: %s\n' "$1" >&2; exit "${2:-70}"; }
 
 usage() {
-  printf 'usage: sh seed.sh deepseek <API_KEY>\n' >&2
+  printf 'usage: sh seed.sh [--global] deepseek <API_KEY>\n' >&2
 }
 
 need() {

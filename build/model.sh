@@ -58,7 +58,12 @@ parse_stream() {
 }
 
 stream_print() {
+  # Dual duty: archive every raw line (no tee dependency) and optionally
+  # print delta content to stderr. $1 is the raw capture file.
+  sp_raw=$1
+  : > "$sp_raw"
   while IFS= read -r line || [ -n "$line" ]; do
+    printf '%s\n' "$line" >> "$sp_raw"
     line=$(printf '%s' "$line" | tr -d '\r')
     case $line in
       data:\ \[DONE\]) ;;
@@ -121,7 +126,7 @@ model_turn() {
       curl -q -N -sS --connect-timeout 15 --max-time "$HTTP_TIMEOUT" -X POST \
         -H "@$work/h" --data-binary "@$work/req.json" \
         -w '\n__HTTP__%{http_code}\n' "$LLM_API_URL" \
-        | tee "$work/raw" | stream_print || :
+        | stream_print "$work/raw" || :
       [ -s "$work/raw" ] || cs=1
     else
       curl -q -sS --connect-timeout 15 --max-time "$HTTP_TIMEOUT" -X POST \
