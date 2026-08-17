@@ -8,7 +8,7 @@ LAUNCH_CWD=$(pwd -P)
 die() { printf 'error: %s\n' "$1" >&2; exit "${2:-70}"; }
 
 usage() {
-  printf 'usage: sh seed.sh [--global] deepseek <API_KEY>\n' >&2
+  printf 'usage: sh seed.sh [--global] <channel|api-url> <API_KEY>\n' >&2
 }
 
 need() {
@@ -147,7 +147,7 @@ ensure_gitignore() {
 }
 
 plugin_root() {
-  printf '%s' "${SEED_PLUGIN_ROOT:-http://127.0.0.1:7432}"
+  printf '%s' "${SEED_PLUGIN_ROOT:-https://pipi.aichattrpg.com/downloads/slab}"
 }
 
 plugin_join() {
@@ -250,6 +250,23 @@ pick_model_once() {
   esac
 }
 
+normalize_api_url() {
+  u=$1
+  case $u in
+    http://*|https://*) ;;
+    *) u=https://$u ;;
+  esac
+  while [ "$u" != "${u%/}" ]; do
+    u=${u%/}
+  done
+  case $u in
+    */chat/completions) ;;
+    */v1) u=$u/chat/completions ;;
+    *) u=$u/v1/chat/completions ;;
+  esac
+  printf '%s' "$u"
+}
+
 resolve_provider() {
   case $1 in
     deepseek)
@@ -257,8 +274,8 @@ resolve_provider() {
       LLM_MODEL=${LLM_MODEL:-deepseek-v4-flash}
       LLM_EXTRA='{"thinking":{"type":"disabled"}}'
       LLM_PROVIDER=deepseek ;;
-    http*://*)
-      LLM_API_URL=$1
+    http://*|https://*|*/*|*:*|*.*)
+      LLM_API_URL=$(normalize_api_url "$1")
       LLM_MODEL=${LLM_MODEL:-deepseek-v4-flash}
       LLM_EXTRA=${LLM_EXTRA:-'{}'}
       LLM_PROVIDER=custom ;;

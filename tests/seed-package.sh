@@ -366,7 +366,7 @@ else
 fi
 
 help=$(/bin/sh "$SEED" --help 2>&1 || true)
-if printf '%s' "$help" | grep -q 'sh seed.sh \[--global\] deepseek <API_KEY>' \
+if printf '%s' "$help" | grep -q 'sh seed.sh \[--global\] <channel|api-url> <API_KEY>' \
   && ! printf '%s' "$help" | grep -q 'install-dir' \
   && ! printf '%s' "$help" | grep -q 'selftest'; then
   printf 'ok   usage is one line\n'
@@ -546,6 +546,31 @@ ck "key not in stdout" awk 'BEGIN{c=0} /sk-TESTKEYNOTREAL/{c=1} END{exit c}' "$d
 ck "gitignore mentions .env" grep -qx '.env' "$cwd/.gitignore"
 if grep -q 'installed:' "$d/err"; then printf 'ok   stub install verified\n'
 else printf 'FAIL stub install verified\n'; fail=$((fail + 1)); fi
+
+u1=$d/url1
+mkdir -p "$u1"
+(
+  cd "$u1"
+  SEED_LLM_STUB=$stub \
+    /bin/sh "$SEED" api.example.com/v1 sk-test
+) > "$d/u1.out" 2> "$d/u1.err" || true
+if grep -q '^LLM_API_URL=https://api.example.com/v1/chat/completions$' "$u1/.env"; then
+  printf 'ok   bare api-url normalizes to chat completions\n'
+else
+  printf 'FAIL bare api-url normalizes to chat completions\n'; fail=$((fail + 1))
+fi
+u2=$d/url2
+mkdir -p "$u2"
+(
+  cd "$u2"
+  SEED_LLM_STUB=$stub \
+    /bin/sh "$SEED" https://api.example.com sk-test2
+) > "$d/u2.out" 2> "$d/u2.err" || true
+if grep -q '^LLM_API_URL=https://api.example.com/v1/chat/completions$' "$u2/.env"; then
+  printf 'ok   https host normalizes to chat completions\n'
+else
+  printf 'FAIL https host normalizes to chat completions\n'; fail=$((fail + 1))
+fi
 if grep -q 'open: sh bin/agent' "$d/err"; then
   printf 'ok   install tells how to open\n'
 else

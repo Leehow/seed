@@ -83,6 +83,7 @@ build/
 
 ```sh
 sh seed.sh deepseek sk-xxxx    # 装到当前目录，写 .env
+sh seed.sh api.example.com/v1 sk-xxxx    # 任意 URL：补 https 并规整到 chat/completions
 sh seed.sh --global deepseek sk-xxxx   # 装到全局：~/.local/bin/seedagent，家 ~/.seed-agent
 sh plugins/serve.sh            # 本地 plugin 根 http://127.0.0.1:7432
 sh seed.sh qwen sk-xxxx        # 非内置渠道：拉 seed/index.json → models → 选一次
@@ -91,7 +92,7 @@ sh bin/agent "任务"            # 一次性
 /bin/sh tests/seed-package.sh  # 离线验收，改完必跑
 ```
 
-种子写死 plugin 根 `http://127.0.0.1:7432`（测试可用 `SEED_PLUGIN_ROOT` 覆盖）。安装只拉 seed 目录。`deepseek` 和完整 URL 不查目录。`bin/agent` 第一次打开才拉 `<根>/agent/index.json`，跑初始化，写 `agent-store/`。
+种子默认 plugin 根 `https://pipi.aichattrpg.com/downloads/slab`（测试和本地 `sh plugins/serve.sh` 可用 `SEED_PLUGIN_ROOT` 覆盖）。安装只拉 seed 目录。`deepseek` 和完整 URL 不查目录。`bin/agent` 第一次打开才拉 `<根>/agent/index.json`，跑初始化，写 `agent-store/`。
 
 用法只有这一行。不要安装目录参数，永远是当前目录。多传路径直接退出。只写 `sh seed.sh deepseek`（没有 key）必须报错要 key。`.env` 已在时可以 `sh seed.sh` 重装，但不必写进 usage。
 
