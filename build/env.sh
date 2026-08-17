@@ -8,7 +8,7 @@ LAUNCH_CWD=$(pwd -P)
 die() { printf 'error: %s\n' "$1" >&2; exit "${2:-70}"; }
 
 usage() {
-  printf 'usage: sh seed.sh [--global] <channel|api-url> <API_KEY>\n' >&2
+  printf 'usage: sh seed.sh [--global] <channel|api-url> <API_KEY> [model]\n' >&2
 }
 
 need() {
@@ -250,6 +250,35 @@ pick_model_once() {
   esac
 }
 
+# Soft pick for URL install: network/empty list is not fatal.
+try_pick_model() {
+  need jq
+  [ -n "${MODELS_URL:-}" ] || return 1
+  [ -n "${LLM_API_KEY:-}" ] || return 1
+  tm_body=$(mktemp "${TMPDIR:-/tmp}/seed-models.XXXXXX")
+  if ! http_get "$MODELS_URL" "$tm_body" "$LLM_API_KEY"; then
+    rm -f "$tm_body"
+    return 1
+  fi
+  ids=$(jq -r '.data[].id // empty' < "$tm_body")
+  rm -f "$tm_body"
+  [ -n "$ids" ] || return 1
+  printf '%s\n' "$ids" | awk '{print NR") "$0}' >&2
+  printf 'model: ' >&2
+  if ! IFS= read -r choice; then
+    return 1
+  fi
+  [ -n "$choice" ] || return 1
+  case $choice in
+    *[!0-9]*)
+      printf '%s\n' "$ids" | grep -qxF "$choice" || return 1
+      LLM_MODEL=$choice ;;
+    *)
+      LLM_MODEL=$(printf '%s\n' "$ids" | awk -v n="$choice" 'NR==n {print; found=1} END {exit found?0:1}') \
+        || return 1 ;;
+  esac
+}
+
 normalize_api_url() {
   u=$1
   case $u in
@@ -271,18 +300,39 @@ resolve_provider() {
   case $1 in
     deepseek)
       LLM_API_URL=${LLM_API_URL:-https://api.deepseek.com/chat/completions}
-      LLM_MODEL=${LLM_MODEL:-deepseek-v4-flash}
+      if [ -n "${3:-}" ]; then
+        LLM_MODEL=$3
+      else
+        LLM_MODEL=${LLM_MODEL:-deepseek-v4-flash}
+      fi
       LLM_EXTRA='{"thinking":{"type":"disabled"}}'
       LLM_PROVIDER=deepseek ;;
     http://*|https://*|*/*|*:*|*.*)
       LLM_API_URL=$(normalize_api_url "$1")
-      LLM_MODEL=${LLM_MODEL:-deepseek-v4-flash}
       LLM_EXTRA=${LLM_EXTRA:-'{}'}
-      LLM_PROVIDER=custom ;;
+      LLM_PROVIDER=custom
+      printf 'api: %s\n' "$LLM_API_URL" >&2
+      if [ -n "${3:-}" ]; then
+        LLM_MODEL=$3
+      else
+        LLM_API_KEY=$2
+        case $LLM_API_URL in
+          */chat/completions) MODELS_URL=${LLM_API_URL%/chat/completions}/models ;;
+          *) MODELS_URL=$(api_origin "$LLM_API_URL")/v1/models ;;
+        esac
+        if ! try_pick_model; then
+          LLM_MODEL=${LLM_MODEL:-deepseek-v4-flash}
+          printf 'note: model list unavailable, using default\n' >&2
+        fi
+      fi ;;
     *)
       LLM_API_KEY=$2
       load_channel_from_catalog "$1"
-      pick_model_once
+      if [ -n "${3:-}" ]; then
+        LLM_MODEL=$3
+      else
+        pick_model_once
+      fi
       LLM_PROVIDER=$1 ;;
   esac
   LLM_API_KEY=$2

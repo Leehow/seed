@@ -366,7 +366,7 @@ else
 fi
 
 help=$(/bin/sh "$SEED" --help 2>&1 || true)
-if printf '%s' "$help" | grep -q 'sh seed.sh \[--global\] <channel|api-url> <API_KEY>' \
+if printf '%s' "$help" | grep -q 'sh seed.sh \[--global\] <channel|api-url> <API_KEY> \[model\]' \
   && ! printf '%s' "$help" | grep -q 'install-dir' \
   && ! printf '%s' "$help" | grep -q 'selftest'; then
   printf 'ok   usage is one line\n'
@@ -504,7 +504,7 @@ rej=$d/reject
 mkdir -p "$rej"
 (
   cd "$rej"
-  /bin/sh "$SEED" deepseek sk-TESTKEYNOTREAL "$d/must-not"
+  /bin/sh "$SEED" deepseek sk-TESTKEYNOTREAL some-model "$d/must-not"
 ) > "$d/rej.out" 2> "$d/rej.err" || true
 if grep -q 'usage:' "$d/rej.err" && [ ! -e "$d/must-not" ]; then
   printf 'ok   extra install-dir rejected\n'
@@ -570,6 +570,24 @@ if grep -q '^LLM_API_URL=https://api.example.com/v1/chat/completions$' "$u2/.env
   printf 'ok   https host normalizes to chat completions\n'
 else
   printf 'FAIL https host normalizes to chat completions\n'; fail=$((fail + 1))
+fi
+u3=$d/url3
+mkdir -p "$u3"
+(
+  cd "$u3"
+  SEED_LLM_STUB=$stub \
+    /bin/sh "$SEED" api.example.com/v1 sk-test test-model
+) > "$d/u3.out" 2> "$d/u3.err" || true
+if grep -q '^LLM_MODEL=test-model$' "$u3/.env" \
+  && grep -q '^LLM_API_URL=https://api.example.com/v1/chat/completions$' "$u3/.env"; then
+  printf 'ok   url install takes explicit model\n'
+else
+  printf 'FAIL url install takes explicit model\n'; fail=$((fail + 1))
+fi
+if grep -q '^note:' "$d/u1.err" && grep -q '^LLM_MODEL=deepseek-v4-flash$' "$u1/.env"; then
+  printf 'ok   url install falls back when model list missing\n'
+else
+  printf 'FAIL url install falls back when model list missing\n'; fail=$((fail + 1))
 fi
 if grep -q 'open: sh bin/agent' "$d/err"; then
   printf 'ok   install tells how to open\n'

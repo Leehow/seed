@@ -131,9 +131,9 @@ case ${1:-} in
     LLM_MODEL=${LLM_MODEL:-deepseek-v4-flash} ;;
   -*) usage; exit 64 ;;
   *)
-    [ "$#" -eq 2 ] || { usage; exit 64; }
+    [ "$#" -eq 2 ] || [ "$#" -eq 3 ] || { usage; exit 64; }
     ensure_jq
-    resolve_provider "$1" "$2" ;;
+    resolve_provider "$1" "$2" "${3:-}" ;;
 esac
 mkdir -p "$INSTALL"
 INSTALL=$(CDPATH= cd "$INSTALL" && pwd -P)

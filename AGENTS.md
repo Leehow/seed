@@ -83,7 +83,7 @@ build/
 
 ```sh
 sh seed.sh deepseek sk-xxxx    # 装到当前目录，写 .env
-sh seed.sh api.example.com/v1 sk-xxxx    # 任意 URL：补 https 并规整到 chat/completions
+sh seed.sh api.example.com/v1 sk-xxxx my-model   # 任意 URL：补 https 并规整到 chat/completions；第三参是模型（可省）
 sh seed.sh --global deepseek sk-xxxx   # 装到全局：~/.local/bin/seedagent，家 ~/.seed-agent
 sh plugins/serve.sh            # 本地 plugin 根 http://127.0.0.1:7432
 sh seed.sh qwen sk-xxxx        # 非内置渠道：拉 seed/index.json → models → 选一次
