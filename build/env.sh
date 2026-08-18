@@ -68,6 +68,17 @@ ensure_jq() {
   if [ "${SEED_FORCE_JQ:-}" != 1 ] && command -v jq >/dev/null 2>&1; then
     return 0
   fi
+  # Termux: Android app processes reject the non-PIE official jq binary
+  # (unexpected e_type), so the platform package manager is the only
+  # working source. One quiet try, then fall through to the download.
+  case ${PREFIX:-} in
+    *com.termux*)
+      if command -v pkg >/dev/null 2>&1; then
+        printf 'installing: jq (pkg)\n' >&2
+        pkg install -y jq >/dev/null 2>&1 || :
+        command -v jq >/dev/null 2>&1 && return 0
+      fi ;;
+  esac
   dest=${SEED_JQ_DEST:-}
   if [ -z "$dest" ]; then
     root=${INSTALL:-$LAUNCH_CWD}

@@ -1,0 +1,1 @@
+The fd file finder (https://github.com/sharkdp/fd) is not installed. Find how to install it on this Debian machine, install it, then use it to list every .md file under the current directory. Write the matching paths to md-files.txt, one path per line, sorted, no extra text. After that, stop.

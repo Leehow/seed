@@ -1,0 +1,4 @@
+source: slab-original
+kind: web-discover
+compare: none (TB does not score "install a missing CLI from the web")
+expect: apt-get install fd-find / github release / cargo; binary may be fd or fdfind

@@ -1,0 +1,5 @@
+source: slab-original
+kind: reuse-search
+compare: SWE-agent search ACI / mini-SWE-agent bash-only
+expect_rich: rg
+expect_clean: grep or find

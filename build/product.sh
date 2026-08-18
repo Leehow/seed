@@ -181,7 +181,7 @@ agent_repair_machine_tree() {
 }
 
 agent_check_machine_tree() {
-  f=$INSTALL/agent-store/index.json
+  f=${1:-$INSTALL/agent-store/index.json}
   [ -f "$f" ] || return 1
   jq -e '
     type == "object"
@@ -196,6 +196,55 @@ agent_check_machine_tree() {
     and (.system.tools | to_entries
          | all(.value | has("ok") and has("present") and has("path")))
   ' "$f" >/dev/null 2>&1
+}
+
+agent_baseline_file() {
+  printf '%s\n' "$INSTALL/agent-store/index.baseline.json"
+}
+
+agent_discard_baseline() {
+  rm -f "$(agent_baseline_file)"
+}
+
+# Template + live probe + ready=true. Independent of the official index,
+# so a half-written tree cannot poison the fallback.
+agent_write_baseline() {
+  store=$INSTALL/agent-store
+  pack=$store/plugins/init.json
+  base=$(agent_baseline_file)
+  [ -f "$pack" ] || return 1
+  pj=$(mktemp "${TMPDIR:-/tmp}/seed-basep.XXXXXX")
+  {
+    printf '{'
+    sep=
+    for pt in sh curl jq rg git python; do
+      printf '%s"%s":%s' "$sep" "$pt" "$(agent_probe_one "$pt")"
+      sep=,
+    done
+    printf '}\n'
+  } > "$pj"
+  tmp=$(mktemp "${TMPDIR:-/tmp}/seed-basew.XXXXXX")
+  if jq --slurpfile t "$pj" '
+      .machine_tree
+      | .ready = true
+      | .system.tools = $t[0]
+    ' "$pack" > "$tmp" 2>/dev/null; then
+    mv "$tmp" "$base"
+    rm -f "$pj"
+    agent_check_machine_tree "$base"
+    return $?
+  fi
+  rm -f "$tmp" "$pj"
+  return 1
+}
+
+agent_restore_baseline() {
+  base=$(agent_baseline_file)
+  dest=$INSTALL/agent-store/index.json
+  [ -f "$base" ] || return 1
+  agent_check_machine_tree "$base" || return 1
+  mv "$base" "$dest"
+  agent_check_machine_tree "$dest"
 }
 
 # Shared fetch: take a catalog body, pull required.init, write both under
@@ -264,6 +313,9 @@ agent_place_trees() {
 agent_probe_one() {
   pt=$1
   pb=$(command -v "$pt" 2>/dev/null || true)
+  if [ -z "$pb" ] && [ "$pt" = python ]; then
+    pb=$(command -v python3 2>/dev/null || true)
+  fi
   if [ -z "$pb" ]; then
     jq -nc '{present:false,path:"",ok:false,note:"not found"}'
     return 0
@@ -318,14 +370,21 @@ agent_run_init() {
   unset INIT_STOP_WHEN_READY
   shell_stop "$sess" 2>/dev/null || :
   agent_repair_machine_tree || true
-  agent_check_machine_tree && return 0
-  die "init failed" 76
 }
 
 agent_ensure_init() {
   [ "${SLAB_SKIP_INIT:-}" = 1 ] && return 0
   agent_repair_machine_tree || true
   if agent_check_machine_tree; then
+    # Engine owns system.tools. Re-probe every ready launch so a model
+    # overwrite or a later apt install cannot leave stale false slots.
+    agent_probe_tools
+    agent_discard_baseline
+    agent_run_hooks after_ready
+    return 0
+  fi
+  if agent_restore_baseline; then
+    agent_probe_tools
     agent_run_hooks after_ready
     return 0
   fi
@@ -333,14 +392,25 @@ agent_ensure_init() {
   agent_fetch_required
   agent_place_trees
   agent_probe_tools
+  agent_write_baseline || die "init failed" 76
   SEED_STREAM=1
   SEED_STREAM_PRINT=1
   export SEED_STREAM SEED_STREAM_PRINT
   agent_run_init
   agent_repair_machine_tree || true
+  agent_probe_tools
   agent_run_hooks after_ready
-  agent_check_machine_tree || die "init failed" 76
-  printf 'ready\n' >&2
+  if agent_check_machine_tree; then
+    agent_discard_baseline
+    printf 'ready\n' >&2
+    return 0
+  fi
+  if agent_restore_baseline; then
+    printf 'note: optional discovery skipped\n' >&2
+    printf 'ready\n' >&2
+    return 0
+  fi
+  die "init failed" 76
 }
 
 agent_update() {

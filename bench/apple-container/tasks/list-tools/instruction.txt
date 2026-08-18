@@ -1,0 +1,1 @@
+Look at the Machine index. Write a file named tools-ok.txt listing every ok tool, other command, and resource name you have indexed, one name per line, sorted. Do not invent names that are not ok in the index.

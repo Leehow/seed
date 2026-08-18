@@ -226,6 +226,11 @@ run_loop() {
     content=$(jq -r '.content // empty' "$evdir/turn-$round.json")
     ntools=$(jq '.tool_calls | length' "$evdir/turn-$round.json")
     if [ "$ntools" -gt 0 ]; then
+      # Show what the model is about to do. Final-answer turns have no
+      # tools and still print once on stdout; do not echo those here.
+      if [ -n "$content" ]; then
+        printf '%s\n' "$content" >&2
+      fi
       jq --argjson t "$(jq '.tool_calls' "$evdir/turn-$round.json")" \
         '. + [{role:"assistant",content:null,tool_calls:($t | map({id:.id,type:"function",function:{name:.name,arguments:.arguments}}))}]' \
         "$msgs" > "$msgs.n" && mv "$msgs.n" "$msgs"

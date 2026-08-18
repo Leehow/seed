@@ -6,9 +6,11 @@ write_shims() {
   fi
   cp "$SELF" "$INSTALL/bin/agent"
   chmod 755 "$INSTALL/bin/agent"
-  for pair in "llm|--llm" "edit|--edit" "shell|--shell-cli"; do
-    name=${pair%%|*}
-    flag=${pair#*|}
+  # ':' as the pair separator: Android mksh reads '|' in ${var%%|*}
+  # patterns as alternation and expands the name to empty.
+  for pair in "llm:--llm" "edit:--edit" "shell:--shell-cli"; do
+    name=${pair%%:*}
+    flag=${pair#*:}
     printf '#!/bin/sh\nexec /bin/sh "$(CDPATH= cd "$(dirname "$0")" && pwd -P)/agent" %s "$@"\n' "$flag" > "$INSTALL/bin/$name"
     chmod 755 "$INSTALL/bin/$name"
   done
@@ -87,12 +89,20 @@ install_main() {
   printf 'global: sh seed.sh --global   # install ~/.local/bin/seedagent for anywhere use\n' >&2
 }
 
-# Global mode: entry on PATH (~/.local/bin/seedagent); state home is separate
-# ($SEED_AGENT_HOME or ~/.seed-agent: agent-store, .env, jq). Workspace stays
-# the launch cwd.
+# Global mode: entry on PATH; state home is separate ($SEED_AGENT_HOME or
+# ~/.seed-agent: agent-store, .env, jq). Workspace stays the launch cwd.
+# Termux has no ~/.local/bin on PATH; its convention is $PREFIX/bin, which
+# is user-writable and always searched.
+global_bin_dir() {
+  case ${PREFIX:-} in
+    *com.termux*) printf '%s/bin' "$PREFIX" ;;
+    *) printf '%s/.local/bin' "$HOME" ;;
+  esac
+}
+
 install_global_main() {
   GH=${SEED_AGENT_HOME:-$HOME/.seed-agent}
-  GB=$HOME/.local/bin
+  GB=$(global_bin_dir)
   INSTALL=$GH
   ensure_jq
   mkdir -p "$GH/bin" "$GB"
@@ -119,7 +129,7 @@ verify_global_install() {
       printf '  FAIL %s failed syntax check\n' "$p" >&2; bad=$((bad + 1))
     fi
   done
-  p=$HOME/.local/bin/seedagent
+  p=$(global_bin_dir)/seedagent
   if [ ! -x "$p" ]; then
     printf '  FAIL missing %s\n' "$p" >&2; bad=$((bad + 1))
   elif ! /bin/sh -n "$p" 2>/dev/null; then
@@ -135,7 +145,7 @@ verify_global_install() {
   intro=$(LAUNCH_CWD=$LAUNCH_CWD SLAB_SKIP_INIT=1 /bin/sh "$INSTALL/bin/agent" </dev/null 2>&1 || true)
   printf '%s' "$intro" | grep -q '>' || { printf '  FAIL agent prompt missing\n' >&2; bad=$((bad + 1)); }
   baked=$(printf '/%s/|/%s/' Users home)
-  if grep -E "$baked" "$INSTALL/bin/agent" "$HOME/.local/bin/seedagent" >/dev/null 2>&1; then
+  if grep -E "$baked" "$INSTALL/bin/agent" "$(global_bin_dir)/seedagent" >/dev/null 2>&1; then
     printf '  FAIL shim baked a host path\n' >&2; bad=$((bad + 1))
   fi
   w=$(mktemp -d "${TMPDIR:-/tmp}/seed-ver.XXXXXX")
@@ -157,7 +167,7 @@ STUB
   set +e
   (
     cd "$w"
-    SLAB_SKIP_INIT=1 SEED_LLM_STUB=$stub SEED_VER_N=$w/n /bin/sh "$HOME/.local/bin/seedagent" --oneshot 'pwd'
+    SLAB_SKIP_INIT=1 SEED_LLM_STUB=$stub SEED_VER_N=$w/n /bin/sh "$(global_bin_dir)/seedagent" --oneshot 'pwd'
   ) > "$w/out" 2> "$w/err"
   set -e
   if ! grep -q ok "$w/out"; then

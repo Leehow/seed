@@ -1,0 +1,4 @@
+source: terminal-bench-2.1/tasks/openssl-selfsigned-cert
+kind: public-compare
+note: official instruction; POSIX rewrite of tests/test_outputs.py
+profiles: rich clean

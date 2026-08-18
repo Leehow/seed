@@ -1,0 +1,3 @@
+source: slab-original
+kind: index
+profiles: rich

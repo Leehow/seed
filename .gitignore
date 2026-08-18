@@ -3,6 +3,8 @@ plugins/jq/jq-linux-*
 plugins/jq/jq-macos-*
 plugins/jq/jq-windows-*
 .agent-runs/
+.seed-agent-runs/
+.seed-tui-runs/
 agent-store/
 .agent-memory/
 .runs/
@@ -15,3 +17,4 @@ agent-store/
 .DS_Store
 bin/jq
 bin/jq.exe
+bench/apple-container/out/
