@@ -1,46 +1,125 @@
 # slab
 
-一颗可直接运行的 POSIX `/bin/sh` coding-agent 种子。
+**A coding agent that is one POSIX `/bin/sh` file.**
 
-仓库根上的 [`seed.sh`](seed.sh) 同时是**唯一产品、唯一运行时、唯一源码**。没有生成步骤，没有 build/pack 双轨，也不会再安装出 `bin/agent`。运行只需要 `/bin/sh`、curl 和 jq；缺 jq 时种子会下载兼容二进制。
+[中文版 README](README.zh-CN.md)
 
-支持 Linux、macOS、WSL、Git Bash；不支持原生 cmd / PowerShell。
+[`seed.sh`](seed.sh) at the repo root is the **only product, the only runtime, and the only source code**. There is no build step, no packaging pipeline, no generated `bin/agent`. It runs on `/bin/sh` + curl + jq — and if jq is missing, the seed downloads a compatible binary by itself.
 
-## 使用
-
-先从 GitHub main 下载 `seed.sh`，不要 `curl | sh`。运行后插件 catalog 默认从同一仓库的 raw `plugins/` 拉取（`https://raw.githubusercontent.com/Leehow/slab/main/plugins`）；可用 `SEED_PLUGIN_ROOT` 覆盖。
+Works on Linux, macOS, WSL, Git Bash, and Android Termux. Native cmd / PowerShell is not supported.
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/Leehow/slab/main/seed.sh -o seed.sh
-cd 你的项目
-/bin/sh /下载路径/seed.sh deepseek sk-你的key
+cd your-project
+/bin/sh seed.sh deepseek sk-your-key
 ```
 
-第一次会把配置写入 `~/.seed/.env`，初始化机器能力索引，然后进入 `>`。空行或 Ctrl-D 退出。之后在任意项目目录直接运行同一个文件：
+That's the whole install. No Node, no Python runtime, no installer, no container. On a bare Debian box whose only tool is curl, the seed bootstraps jq, initializes, and writes its first file in **15 seconds**.
+
+---
+
+## The question this repo asks
+
+Every mainstream coding agent ships as a Node or Python application with a tool zoo: read, grep, glob, todo lists, sub-agents, planners. slab asks a deliberately narrow question:
+
+> **Can POSIX `/bin/sh` + curl + jq alone sustain a tool-using coding agent — including streaming SSE, a persistent shell, and exact-replace editing?**
+
+The answer so far: yes, and the constraint turns out to be a feature. A single portable file means zero install friction, auditable behavior (you can read your entire agent), and an agent that can carry itself onto any box that has a shell — including an Android tablet.
+
+## Design principles
+
+- **One file is everything.** Download `seed.sh`, feed it any OpenAI-compatible endpoint and key, and it is a complete agent. The same file is the documentation of itself: ~everything the agent does is readable shell.
+- **The shell owns the loop; the model owns the judgment.** The main loop, SSE streaming, error handling, and round limits live in the shell. What to look at, what to change, and when to stop are the model's decisions. The model is never asked to write its own controller each turn.
+- **Exactly two API tools.** A persistent `shell` (cwd and environment survive across calls) and an exact-replace `edit` (match zero or multiple times → fail, file untouched). No read/grep/glob/todo tools — those are ordinary commands inside the shell. "Two tools" is not "two abilities": everything the machine has is reachable through them.
+- **Find, verify, register, reuse — build only as a last resort.** On first start the seed surveys the machine and writes a capability index. If `rg` exists, use `rg`; if the box has Codex installed, register it. On a clean box with no `fd`, the agent looked up that Debian ships it as `fd-find` with binary `fdfind`, installed it, and finished the search task. Tool discovery is a graded skill, not an assumption.
+- **Extensions ship as prompts, not code.** The plugin catalog under [`plugins/agent/`](plugins/agent/) publishes JSON prompts and empty scaffolds. New capabilities are grown by the model on the local machine, guided by prompts — never by fattening the seed.
+- **Never trust the model's word for it.** The interactive `/ini` command lets the model choose how to install the runtime as a global `seed` command, but the shell independently notarizes the result: the receipt, the frozen original PATH, the executable entry point, and a `--probe` identity check must all agree before success is declared. Fake receipts and PATH pollution are part of the test suite.
+
+## What it can do
+
+- Act as a coding agent in any project directory: interactive `>` prompt, or one-shot `-p "task"`.
+- Write project code in **any language** — the POSIX restriction covers the runtime, not the artifacts.
+- Repair its own environment: fetch jq when missing, `apt-get install` what a task needs, look up the right package name before installing.
+- Probe and reuse whatever the host already has (CLIs, interpreters, services), recording each capability with usage, invocation, and smoke-test results in a machine index that amortizes across tasks.
+- Install itself as a global command (`/ini`) with shell-side acceptance testing.
+- Run the official Terminal-Bench 2.1 suite (Harbor + Docker, all 89 tasks) via the adapter in [`bench/harbor/`](bench/harbor/).
+
+## Experiments
+
+### Cold start and capability indexing (Apple container, Debian 12 aarch64)
+
+The same seed was dropped into a **clean** box (only curl + CA certificates) and a **rich** box (git / rg / python3 / jq / openssl / Codex preinstalled). Full logs in [`bench/apple-container/COMPARE.md`](bench/apple-container/COMPARE.md).
+
+| Environment | Task | Result | Wall clock | What it actually did |
+|---|---|---|---|---|
+| clean | hello-file | pass | 15s | fetched jq itself → init → wrote the file |
+| clean | web-install-fd | pass | 14s | discovered Debian package `fd-find`, used `fdfind` |
+| clean | openssl-selfsigned-cert (TB 2.1 instruction) | pass | 50s | installed python3 on the fly, wrote its own check script |
+| clean | nginx-request-logging (TB 2.1 instruction) | pass | 35s | installed nginx, fixed a 403, all four checks green |
+| clean | fix-git (TB 2.1 instruction) | pass | 17s | installed git, merged the branch |
+
+Index amortization: paying for a full capability census up front (54s, registering 11 tools including Codex 0.147.0) makes every subsequent task cheap — hello-file 6s, list-tools 16s, fix-git 10s. Skip the census and the index stays empty: later tasks that depend on it fail. The survey is a cost you pay once and collect on all session long.
+
+### Official Terminal-Bench 2.1 (Harbor + Docker, 89 tasks)
+
+The adapter [`bench/harbor/seed_agent.py`](bench/harbor/seed_agent.py) installs the standalone `seed.sh` into each task container (guaranteeing only curl + CA — jq, git, python are the seed's own problem), runs `--oneshot` on the unmodified official instruction, and lets the official verifier grade.
+
+- seed + `deepseek-v4-pro`, k=1 single pass: **Mean 0.360 (32/89)**. This is the full official task set with the official verifier — but a single-attempt score, not the k=5 leaderboard protocol. We label it accordingly.
+- A second full run with `deepseek-v4-flash` (after fixing a streaming-stall bug and adding a time-budget preamble) is in progress, tracking above the first run at the midpoint.
+- Same-model baselines are wired up for comparison runs: `sh bench/harbor/run.sh --agent mini-swe-agent --all` and `--agent terminus-2`.
+- Failure analysis is published, not hidden: the three dominant modes are "never submitted", "ran out of time mid-work", and "declared done but failed verification". One notable finding: an earlier `--max-time` on the streaming curl was decapitating long model thinking and mis-charging the failure to the model — now replaced by stall detection, with regression tests.
+
+### An Android tablet builds a 3D game
+
+We typed the seed into a stock Android tablet's Termux over adb: it self-healed the missing jq, initialized, and opened its `>` prompt. Then we gave it one task — *"make a 3D web game"* — and the agent on the tablet did the rest unaided:
+
+1. wrote a single-file three.js (CDN) game, **Cube Tap** — tap the spinning cubes, score on hit;
+2. found the local python3, served the game with `nohup python -m http.server 8080`;
+3. verified `curl localhost:8080` returned 200 **before** reporting the URL;
+4. the game opened in the tablet browser, playable by touch.
+
+No human wrote a line of the game. The runtime that did this is the same single shell file, running on a phone-grade ARM box.
+
+### Notarized install and offline contract tests
+
+- `/ini` acceptance has been tested against fake receipts and PATH pollution: the model claiming success does nothing; the shell re-resolves `seed` with the frozen pre-run PATH and re-checks identity via `--probe`.
+- [`tests/seed-package.sh`](tests/seed-package.sh) is a fully offline product contract (fake plugin transport + LLM stub; no network, no real keys) covering 20+ cases: SSE chunk merging, truncated streams triggering a retry, empty replies never being accepted as a final answer, and more.
+
+## Usage
+
+Download `seed.sh` from GitHub main first — do not `curl | sh`. The plugin catalog is fetched from this repo's raw `plugins/` by default (`https://raw.githubusercontent.com/Leehow/slab/main/plugins`); override with `SEED_PLUGIN_ROOT`.
 
 ```sh
-/bin/sh /下载路径/seed.sh
-/bin/sh /下载路径/seed.sh -p "把安装说明写进 README"
+curl -fsSL https://raw.githubusercontent.com/Leehow/slab/main/seed.sh -o seed.sh
+cd your-project
+/bin/sh /path/to/seed.sh deepseek sk-your-key
 ```
 
-任意 OpenAI 兼容接口（第三参模型名可省）：
+First run writes config to `~/.seed/.env`, initializes the machine capability index, then opens the `>` prompt. Exit with an empty line or Ctrl-D. Afterwards, run the same file from any project directory:
 
 ```sh
-/bin/sh seed.sh https://api.example.com/v1 sk-xxxx 模型名
+/bin/sh /path/to/seed.sh
+/bin/sh /path/to/seed.sh -p "write the install instructions into README"
 ```
 
-在交互提示符输入 `/ini`，模型会尝试把当前 runtime 安装成全局命令；外壳会独立检查回执、PATH 和 probe。成功后：
+Any OpenAI-compatible endpoint (third argument, the model name, is optional):
+
+```sh
+/bin/sh seed.sh https://api.example.com/v1 sk-xxxx model-name
+```
+
+Type `/ini` at the interactive prompt and the model will try to install the current runtime as a global command; the shell independently checks the receipt, PATH, and probe. On success:
 
 ```sh
 seed
-seed -p "任务"
+seed -p "task"
 ```
 
-工作区始终是启动命令时的当前目录。状态目录默认 `~/.seed`，可用 `SEED_HOME` 隔离。不要提交 `.env` 或运行证据。
+The workspace is always the directory you launched from. State lives in `~/.seed` by default; isolate with `SEED_HOME`. Never commit `.env` or run evidence.
 
-## 开发
+## Development
 
-直接修改根 [`seed.sh`](seed.sh)，然后运行：
+Edit the root [`seed.sh`](seed.sh) directly, then run:
 
 ```sh
 /bin/sh -n seed.sh
@@ -48,4 +127,22 @@ seed -p "任务"
 git diff --check
 ```
 
-agent catalog 仍在 [`plugins/agent/`](plugins/agent/)；其中发布的是提示词，不是另一套 runtime。设计与维护约束见 [AGENTS.md](AGENTS.md) 和 [docs/理念与设计.md](docs/理念与设计.md)。
+The agent catalog lives in [`plugins/agent/`](plugins/agent/) and publishes prompts, not a second runtime. Design and maintenance constraints: [AGENTS.md](AGENTS.md) and [docs/理念与设计.md](docs/理念与设计.md).
+
+## Repository layout
+
+| Path | Role |
+|---|---|
+| `seed.sh` | the standalone runtime — also the only editable implementation |
+| `tests/seed-package.sh` | fully offline product contract |
+| `plugins/agent/` | prompt catalog for initialization and lazily-grown extensions |
+| `plugins/seed/` | provider / model catalog |
+| `bench/apple-container/` | cold-start / rich-environment / amortization bench |
+| `bench/harbor/` | official Terminal-Bench 2.1 adapter and drivers |
+| `docs/理念与设计.md` | philosophy and runtime contract |
+
+## Honest limits
+
+- TB 2.1 scores are single-attempt (k=1), not leaderboard protocol (k=5); community submission is currently closed, so nothing here claims a leaderboard rank.
+- The seed depends on a model that supports standard `tool_calls`; models that stop to ask questions mid-task score poorly under benchmark conditions.
+- An empty toolbox **plus** no network is the design's weak spot — "find before build" needs somewhere to find.
