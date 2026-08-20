@@ -1,3 +1,0 @@
-source: slab-original
-kind: smoke
-compare: none
