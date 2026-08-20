@@ -1,1 +1,0 @@
-A secret token is hidden somewhere under the current directory. Find the line that looks like TOKEN=... and write only the token value (the part after =) into found.txt as a single line. Do not write anything else.

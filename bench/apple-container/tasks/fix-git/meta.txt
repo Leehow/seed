@@ -1,4 +1,0 @@
-source: terminal-bench-2.1/tasks/fix-git
-kind: public-compare
-note: same human instruction; local fixture is a two-commit site instead of the original TB tree
-profiles: rich
