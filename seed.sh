@@ -167,7 +167,7 @@ ensure_gitignore() {
 }
 
 plugin_root() {
-  printf '%s' "${SEED_PLUGIN_ROOT:-https://pipi.aichattrpg.com/downloads/slab}"
+  printf '%s' "${SEED_PLUGIN_ROOT:-https://raw.githubusercontent.com/Leehow/slab/main/plugins}"
 }
 
 plugin_join() {

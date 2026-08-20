@@ -8,7 +8,7 @@
 
 ## 使用
 
-先下载文件，不要 `curl | sh`：
+先从 GitHub main 下载 `seed.sh`，不要 `curl | sh`。运行后插件 catalog 默认从同一仓库的 raw `plugins/` 拉取（`https://raw.githubusercontent.com/Leehow/slab/main/plugins`）；可用 `SEED_PLUGIN_ROOT` 覆盖。
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/Leehow/slab/main/seed.sh -o seed.sh

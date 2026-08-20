@@ -128,7 +128,7 @@ harbor_seed() {
     -m "$MODEL_LABEL" \
     --ae "SEED_ENV_FILE=${ENVFILE}" \
     --ae "AGENT_MAX_ROUNDS=${ROUNDS}" \
-    --ae "SEED_PLUGIN_ROOT=${SEED_PLUGIN_ROOT:-https://pipi.aichattrpg.com/downloads/slab}" \
+    --ae "SEED_PLUGIN_ROOT=${SEED_PLUGIN_ROOT:-https://raw.githubusercontent.com/Leehow/slab/main/plugins}" \
     "$@"
 }
 

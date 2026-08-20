@@ -29,6 +29,12 @@ else
 fi
 ck 'legacy build source is absent' test ! -e "$ROOT/build/pack.sh"
 ck 'legacy agent entry is absent' test ! -e "$ROOT/bin/agent"
+if grep -q "SEED_PLUGIN_ROOT:-https://raw.githubusercontent.com/Leehow/slab/main/plugins}" "$SEED" \
+  && ! grep -q 'pipi.aichattrpg.com/downloads/slab' "$SEED"; then
+  ok 'default plugin_root is GitHub raw plugins'
+else
+  bad 'default plugin_root is GitHub raw plugins'
+fi
 
 mkdir -p "$t/tools" "$t/work" "$t/state" "$t/plugin/agent"
 work=$(CDPATH= cd "$t/work" && pwd -P)
