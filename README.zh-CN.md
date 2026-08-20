@@ -1,4 +1,4 @@
-# slab
+# seed
 
 **一个 coding agent，整个就是一份 POSIX `/bin/sh` 文件。**
 
@@ -20,7 +20,7 @@ cd 你的项目
 
 ## 这个仓库在问什么
 
-主流 coding agent 都是 Node 或 Python 应用，带一整个工具动物园：read、grep、glob、todo、子代理、规划器。slab 问一个刻意收窄的问题：
+主流 coding agent 都是 Node 或 Python 应用，带一整个工具动物园：read、grep、glob、todo、子代理、规划器。seed 问一个刻意收窄的问题：
 
 > **只用 POSIX `/bin/sh` + curl + jq，能不能撑住一个带工具的 coding agent——包括 SSE 流式、持久 shell 和精确替换编辑？**
 

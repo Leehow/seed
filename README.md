@@ -1,4 +1,4 @@
-# slab
+# seed
 
 **A coding agent that is one POSIX `/bin/sh` file.**
 
@@ -20,7 +20,7 @@ That's the whole install. No Node, no Python runtime, no installer, no container
 
 ## The question this repo asks
 
-Every mainstream coding agent ships as a Node or Python application with a tool zoo: read, grep, glob, todo lists, sub-agents, planners. slab asks a deliberately narrow question:
+Every mainstream coding agent ships as a Node or Python application with a tool zoo: read, grep, glob, todo lists, sub-agents, planners. seed asks a deliberately narrow question:
 
 > **Can POSIX `/bin/sh` + curl + jq alone sustain a tool-using coding agent — including streaming SSE, a persistent shell, and exact-replace editing?**
 
