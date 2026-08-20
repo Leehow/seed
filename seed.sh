@@ -5,7 +5,10 @@ set -eu
 umask 077
 
 SELF=$(CDPATH= cd "$(dirname "$0")" && pwd -P)/$(basename "$0")
-AGENT_MAX_ROUNDS=${AGENT_MAX_ROUNDS:-20}
+AGENT_MAX_ROUNDS=${AGENT_MAX_ROUNDS:-80}
+# Empty no-tool turns are provider glitches, never successful completion.
+# This is retries after the initial bad turn; set to 0 only for diagnostics.
+SEED_EMPTY_RETRIES=${SEED_EMPTY_RETRIES:-3}
 ACTION_TIMEOUT=${SEED_ACTION_TIMEOUT:-180}
 MAX_OBS_BYTES=${SEED_MAX_OBS_BYTES:-16384}
 HTTP_TIMEOUT=${SEED_HTTP_TIMEOUT:-300}
@@ -1016,13 +1019,28 @@ run_loop() {
         break
       fi
     else
-      # A blank turn with no tool_calls is a provider glitch, not an
-      # answer. Ask again once before accepting it as final.
-      if [ -z "$content" ] && [ ! -f "$evdir/empty-retried" ]; then
-        touch "$evdir/empty-retried"
-        printf 'llm: empty turn, retry\n' >&2
-        round=$((round + 1))
-        continue
+      # No tools only returns control when the model actually supplied a
+      # final answer. Blank (including whitespace-only) turns are provider
+      # glitches; nudge and retry them rather than silently succeeding.
+      compact_content=$(printf '%s' "$content" | tr -d '[:space:]')
+      if [ -z "$compact_content" ]; then
+        empty_tries=$(cat "$evdir/empty-retries" 2>/dev/null || echo 0)
+        case $empty_tries in ''|*[!0-9]*) empty_tries=0 ;; esac
+        case ${SEED_EMPTY_RETRIES:-3} in
+          ''|*[!0-9]*) empty_max=3 ;;
+          *) empty_max=$SEED_EMPTY_RETRIES ;;
+        esac
+        if [ "$empty_tries" -lt "$empty_max" ]; then
+          empty_tries=$((empty_tries + 1))
+          printf '%s\n' "$empty_tries" > "$evdir/empty-retries"
+          printf 'llm: empty turn, retry %s/%s\n' "$empty_tries" "$empty_max" >&2
+          jq '. + [{role:"user",content:"Your previous response was empty. Continue the task: use tools if needed, or provide a non-empty final response."}]' \
+            "$msgs" > "$msgs.n" && mv "$msgs.n" "$msgs"
+          round=$((round + 1))
+          continue
+        fi
+        printf 'error: llm: empty turn retry limit reached (%s)\n' "$empty_max" >&2
+        return 74
       fi
       final=$content
       jq --arg c "$content" '. + [{role:"assistant",content:$c}]' "$msgs" > "$msgs.n" && mv "$msgs.n" "$msgs"
@@ -1489,7 +1507,7 @@ LAUNCH_CWD=$(pwd -P)
 # Freeze the caller-visible command search path before ensure_jq may add a
 # private runtime dependency directory. /ini success is judged against this.
 SEED_LAUNCH_PATH=${PATH:-}
-AGENT_MAX_ROUNDS=${AGENT_MAX_ROUNDS:-20}
+AGENT_MAX_ROUNDS=${AGENT_MAX_ROUNDS:-80}
 ACTION_TIMEOUT=${SEED_ACTION_TIMEOUT:-180}
 MAX_OBS_BYTES=${SEED_MAX_OBS_BYTES:-16384}
 HTTP_TIMEOUT=${SEED_HTTP_TIMEOUT:-300}
