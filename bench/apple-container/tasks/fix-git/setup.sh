@@ -1,6 +1,10 @@
 #!/bin/sh
 set -eu
 ws=$1
+if ! command -v git >/dev/null 2>&1; then
+  apt-get update -qq
+  apt-get install -y -qq --no-install-recommends git
+fi
 cd "$ws"
 git config --global user.email 'bench@example.com'
 git config --global user.name 'bench'

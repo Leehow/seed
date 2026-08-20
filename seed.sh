@@ -1,6 +1,6 @@
 #!/bin/sh
-# Packed from build/. Do not edit. Change build/ and run: sh build/pack.sh
-#   sh seed.sh deepseek sk-xxxx
+# seed.sh is the standalone runtime and its only source. Edit this file directly.
+#   /bin/sh seed.sh deepseek sk-xxxx
 set -eu
 umask 077
 
@@ -9,12 +9,15 @@ AGENT_MAX_ROUNDS=${AGENT_MAX_ROUNDS:-20}
 ACTION_TIMEOUT=${SEED_ACTION_TIMEOUT:-180}
 MAX_OBS_BYTES=${SEED_MAX_OBS_BYTES:-16384}
 HTTP_TIMEOUT=${SEED_HTTP_TIMEOUT:-300}
+# Streams die on stall, not on total time: reasoning models can think
+# past any fixed --max-time while still sending deltas.
+HTTP_STALL=${SEED_HTTP_STALL:-300}
 LAUNCH_CWD=$(pwd -P)
 
 die() { printf 'error: %s\n' "$1" >&2; exit "${2:-70}"; }
 
 usage() {
-  printf 'usage: sh seed.sh [--global] <channel|api-url> <API_KEY> [model]\n' >&2
+  printf 'usage: sh seed.sh <channel|api-url> <API_KEY> [model]\n' >&2
 }
 
 need() {
@@ -585,8 +588,10 @@ parse_stream() {
       | .usage = (if $c.usage then $c.usage else .usage end)
       | reduce ($d.tool_calls // [])[] as $t (.;
           ($t.index // 0 | tostring) as $i
-          | .tools[$i].id = ($t.id // .tools[$i].id // "")
-          | .tools[$i].name = ($t.function.name // .tools[$i].name // "")
+          | ($t.id // "") as $nid
+          | ($t.function.name // "") as $nname
+          | .tools[$i].id = (if $nid != "" then $nid else (.tools[$i].id // "") end)
+          | .tools[$i].name = (if $nname != "" then $nname else (.tools[$i].name // "") end)
           | .tools[$i].arguments += ($t.function.arguments // "")
         )
     )
@@ -673,7 +678,8 @@ model_turn() {
   while :; do
     cs=0
     if [ "$stream" = true ]; then
-      curl -q -N -sS --connect-timeout 15 --max-time "$HTTP_TIMEOUT" -X POST \
+      curl -q -N -sS --connect-timeout 15 \
+        --speed-limit 1 --speed-time "$HTTP_STALL" -X POST \
         -H "@$work/h" --data-binary "@$work/req.json" \
         -w '\n__HTTP__%{http_code}\n' "$LLM_API_URL" \
         | stream_print "$work/raw" || :
@@ -688,7 +694,24 @@ model_turn() {
       code=$(awk '/^__HTTP__/{print substr($0,9)}' "$work/raw" | tail -1)
     fi
     case "$cs:${code:-}" in
-      0:2*) break ;;
+      0:2*)
+        # A 2xx stream with no finish_reason means the connection died
+        # mid-turn (stall kill, proxy cut). Retry; never parse a half turn
+        # into an empty final answer.
+        if [ "$stream" = true ] \
+          && ! grep -q '"finish_reason"[[:space:]]*:[[:space:]]*"' "$work/raw"; then
+          if [ "$try" -eq 1 ]; then
+            try=2
+            printf 'llm: truncated stream, retry\n' >&2
+            sleep 2
+            continue
+          fi
+          rm -rf "$work"
+          printf 'error: llm: truncated stream\n' >&2
+          return 71
+        fi
+        break
+        ;;
       0:401|0:403)
         rm -rf "$work"
         printf 'error: llm: API key rejected (HTTP %s)\n' "$code" >&2
@@ -1004,6 +1027,14 @@ run_loop() {
         break
       fi
     else
+      # A blank turn with no tool_calls is a provider glitch, not an
+      # answer. Ask again once before accepting it as final.
+      if [ -z "$content" ] && [ ! -f "$evdir/empty-retried" ]; then
+        touch "$evdir/empty-retried"
+        printf 'llm: empty turn, retry\n' >&2
+        round=$((round + 1))
+        continue
+      fi
       final=$content
       jq --arg c "$content" '. + [{role:"assistant",content:$c}]' "$msgs" > "$msgs.n" && mv "$msgs.n" "$msgs"
       break
@@ -1024,201 +1055,8 @@ run_loop() {
   return 0
 }
 
-write_shims() {
-  mkdir -p "$INSTALL/bin"
-  if [ "$SELF" != "$INSTALL/seed.sh" ]; then
-    cp "$SELF" "$INSTALL/seed.sh"
-    chmod 755 "$INSTALL/seed.sh"
-  fi
-  cp "$SELF" "$INSTALL/bin/agent"
-  chmod 755 "$INSTALL/bin/agent"
-  # ':' as the pair separator: Android mksh reads '|' in ${var%%|*}
-  # patterns as alternation and expands the name to empty.
-  for pair in "llm:--llm" "edit:--edit" "shell:--shell-cli"; do
-    name=${pair%%:*}
-    flag=${pair#*:}
-    printf '#!/bin/sh\nexec /bin/sh "$(CDPATH= cd "$(dirname "$0")" && pwd -P)/agent" %s "$@"\n' "$flag" > "$INSTALL/bin/$name"
-    chmod 755 "$INSTALL/bin/$name"
-  done
-}
-
-verify_install() {
-  bad=0
-  for f in agent llm edit shell; do
-    p=$INSTALL/bin/$f
-    if [ ! -x "$p" ]; then
-      printf '  FAIL missing %s\n' "$p" >&2; bad=$((bad + 1))
-    elif ! /bin/sh -n "$p" 2>/dev/null; then
-      printf '  FAIL %s failed syntax check\n' "$p" >&2; bad=$((bad + 1))
-    fi
-  done
-  [ -f "$INSTALL/seed.sh" ] || { printf '  FAIL missing seed.sh\n' >&2; bad=$((bad + 1)); }
-  if [ ! -f "$LAUNCH_CWD/.env" ] || [ ! -f "$INSTALL/.env" ]; then
-    printf '  FAIL incomplete .env\n' >&2; bad=$((bad + 1))
-  else
-    k1=$(jq -r -n --rawfile e "$LAUNCH_CWD/.env" '$e | split("\n") | map(select(startswith("LLM_API_KEY="))) | .[0] | split("=")[1]' 2>/dev/null || grep '^LLM_API_KEY=' "$LAUNCH_CWD/.env" | sed 's/^LLM_API_KEY=//')
-    [ -n "$k1" ] || { printf '  FAIL .env has no key\n' >&2; bad=$((bad + 1)); }
-  fi
-  intro=$(LAUNCH_CWD=$LAUNCH_CWD SLAB_SKIP_INIT=1 /bin/sh "$INSTALL/bin/agent" </dev/null 2>&1 || true)
-  printf '%s' "$intro" | grep -q '>' || { printf '  FAIL agent prompt missing\n' >&2; bad=$((bad + 1)); }
-  extra=$(printf '%s' "$intro" | tr -d '>\n ')
-  [ -z "$extra" ] || { printf '  FAIL agent lectured on open\n' >&2; bad=$((bad + 1)); }
-  baked=$(printf '/%s/|/%s/' Users home)
-  if grep -E "$baked" "$INSTALL/bin/agent" "$INSTALL/bin/edit" "$INSTALL/bin/llm" "$INSTALL/bin/shell" >/dev/null 2>&1; then
-    printf '  FAIL shim baked a host path\n' >&2; bad=$((bad + 1))
-  fi
-  if grep -E 'exec /bin/sh .*seed\.sh' "$INSTALL/bin/agent" >/dev/null 2>&1; then
-    printf '  FAIL agent execs seed.sh\n' >&2; bad=$((bad + 1))
-  fi
-  w=$(mktemp -d "${TMPDIR:-/tmp}/seed-ver.XXXXXX")
-  w=$(CDPATH= cd "$w" && pwd)
-  stub=$w/stub
-  printf '0\n' > "$w/n"
-  cat > "$stub" <<'STUB'
-#!/bin/sh
-n=$(cat "$SEED_VER_N")
-n=$((n + 1))
-printf '%s\n' "$n" > "$SEED_VER_N"
-if [ "$n" -eq 1 ]; then
-  printf '%s\n' '{"content":"","tool_calls":[{"id":"v1","name":"shell","arguments":"{\"command\":\"pwd\"}"}],"usage":{"prompt_tokens":1,"completion_tokens":1}}'
-else
-  printf '%s\n' '{"content":"ok","tool_calls":[],"usage":{"prompt_tokens":1,"completion_tokens":1}}'
-fi
-STUB
-  chmod +x "$stub"
-  set +e
-  (
-    cd "$w"
-    SLAB_SKIP_INIT=1 SEED_LLM_STUB=$stub SEED_VER_N=$w/n /bin/sh "$INSTALL/bin/agent" --oneshot 'pwd'
-  ) > "$w/out" 2> "$w/err"
-  set -e
-  if ! grep -q ok "$w/out"; then
-    printf '  FAIL stub tool_calls did not run\n' >&2; bad=$((bad + 1))
-  fi
-  if ! grep -FR "$w" "$w/.agent-runs" >/dev/null 2>&1; then
-    printf '  FAIL stub workspace was not the temp dir\n' >&2; bad=$((bad + 1))
-  fi
-  rm -rf "$w"
-  [ "$bad" -eq 0 ] || die "verify failed: $bad check(s)" 76
-}
-
-install_main() {
-  if [ "${GLOBAL:-0}" = 1 ]; then install_global_main; return 0; fi
-  ensure_jq
-  write_env_file "$LAUNCH_CWD/.env"
-  write_env_file "$INSTALL/.env"
-  ensure_gitignore "$LAUNCH_CWD"
-  write_shims
-  verify_install
-  printf 'installed: bin/agent\n' >&2
-  printf 'open: sh bin/agent\n' >&2
-  printf 'global: sh seed.sh --global   # install ~/.local/bin/seedagent for anywhere use\n' >&2
-}
-
-# Global mode: entry on PATH; state home is separate ($SEED_AGENT_HOME or
-# ~/.seed-agent: agent-store, .env, jq). Workspace stays the launch cwd.
-# Termux has no ~/.local/bin on PATH; its convention is $PREFIX/bin, which
-# is user-writable and always searched.
-global_bin_dir() {
-  case ${PREFIX:-} in
-    *com.termux*) printf '%s/bin' "$PREFIX" ;;
-    *) printf '%s/.local/bin' "$HOME" ;;
-  esac
-}
-
-install_global_main() {
-  GH=${SEED_AGENT_HOME:-$HOME/.seed-agent}
-  GB=$(global_bin_dir)
-  INSTALL=$GH
-  ensure_jq
-  mkdir -p "$GH/bin" "$GB"
-  write_env_file "$GH/.env"
-  ensure_gitignore "$GH"
-  write_shims
-  cp "$SELF" "$GB/seedagent"
-  chmod 755 "$GB/seedagent"
-  verify_global_install
-  printf 'installed: %s\n' "$GB/seedagent" >&2
-  printf 'open: seedagent\n' >&2
-  printf 'oneshot: seedagent -p "task"\n' >&2
-  command -v seedagent >/dev/null 2>&1 || \
-    printf 'note: %s is not on PATH; add it to use seedagent anywhere\n' "$GB" >&2
-}
-
-verify_global_install() {
-  bad=0
-  for f in agent llm edit shell; do
-    p=$INSTALL/bin/$f
-    if [ ! -x "$p" ]; then
-      printf '  FAIL missing %s\n' "$p" >&2; bad=$((bad + 1))
-    elif ! /bin/sh -n "$p" 2>/dev/null; then
-      printf '  FAIL %s failed syntax check\n' "$p" >&2; bad=$((bad + 1))
-    fi
-  done
-  p=$(global_bin_dir)/seedagent
-  if [ ! -x "$p" ]; then
-    printf '  FAIL missing %s\n' "$p" >&2; bad=$((bad + 1))
-  elif ! /bin/sh -n "$p" 2>/dev/null; then
-    printf '  FAIL %s failed syntax check\n' "$p" >&2; bad=$((bad + 1))
-  fi
-  [ -f "$INSTALL/seed.sh" ] || { printf '  FAIL missing seed.sh\n' >&2; bad=$((bad + 1)); }
-  if [ ! -f "$INSTALL/.env" ]; then
-    printf '  FAIL incomplete .env\n' >&2; bad=$((bad + 1))
-  else
-    k1=$(grep '^LLM_API_KEY=' "$INSTALL/.env" | sed 's/^LLM_API_KEY=//')
-    [ -n "$k1" ] || { printf '  FAIL .env has no key\n' >&2; bad=$((bad + 1)); }
-  fi
-  intro=$(LAUNCH_CWD=$LAUNCH_CWD SLAB_SKIP_INIT=1 /bin/sh "$INSTALL/bin/agent" </dev/null 2>&1 || true)
-  printf '%s' "$intro" | grep -q '>' || { printf '  FAIL agent prompt missing\n' >&2; bad=$((bad + 1)); }
-  baked=$(printf '/%s/|/%s/' Users home)
-  if grep -E "$baked" "$INSTALL/bin/agent" "$(global_bin_dir)/seedagent" >/dev/null 2>&1; then
-    printf '  FAIL shim baked a host path\n' >&2; bad=$((bad + 1))
-  fi
-  w=$(mktemp -d "${TMPDIR:-/tmp}/seed-ver.XXXXXX")
-  w=$(CDPATH= cd "$w" && pwd)
-  stub=$w/stub
-  printf '0\n' > "$w/n"
-  cat > "$stub" <<'STUB'
-#!/bin/sh
-n=$(cat "$SEED_VER_N")
-n=$((n + 1))
-printf '%s\n' "$n" > "$SEED_VER_N"
-if [ "$n" -eq 1 ]; then
-  printf '%s\n' '{"content":"","tool_calls":[{"id":"v1","name":"shell","arguments":"{\"command\":\"pwd\"}"}],"usage":{"prompt_tokens":1,"completion_tokens":1}}'
-else
-  printf '%s\n' '{"content":"ok","tool_calls":[],"usage":{"prompt_tokens":1,"completion_tokens":1}}'
-fi
-STUB
-  chmod +x "$stub"
-  set +e
-  (
-    cd "$w"
-    SLAB_SKIP_INIT=1 SEED_LLM_STUB=$stub SEED_VER_N=$w/n /bin/sh "$(global_bin_dir)/seedagent" --oneshot 'pwd'
-  ) > "$w/out" 2> "$w/err"
-  set -e
-  if ! grep -q ok "$w/out"; then
-    printf '  FAIL stub tool_calls did not run\n' >&2; bad=$((bad + 1))
-  fi
-  if ! grep -FR "$w" "$w/.agent-runs" >/dev/null 2>&1; then
-    printf '  FAIL stub workspace was not the temp dir\n' >&2; bad=$((bad + 1))
-  fi
-  # home separation: state under the home, never next to the entry
-  [ -d "$INSTALL/agent-store" ] || { printf '  FAIL agent-store not under home\n' >&2; bad=$((bad + 1)); }
-  [ ! -e "$HOME/.local/agent-store" ] || { printf '  FAIL state leaked next to entry\n' >&2; bad=$((bad + 1)); }
-  rm -rf "$w"
-  [ "$bad" -eq 0 ] || die "verify failed: $bad check(s)" 76
-}
-
 product_root() {
-  case $SELF in
-    */bin/agent) CDPATH= cd "$(dirname "$SELF")/.." && pwd -P ;;
-    */bin/seedagent)
-      # Global entry on PATH: state home is separate from the entry dir.
-      pr=${SEED_AGENT_HOME:-$HOME/.seed-agent}
-      mkdir -p "$pr"
-      CDPATH= cd "$pr" && pwd -P ;;
-    *) CDPATH= cd "$(dirname "$SELF")" && pwd -P ;;
-  esac
+  CDPATH= cd "$(dirname "$SELF")" && pwd -P
 }
 
 skill_catalog() {
@@ -1655,144 +1493,243 @@ agent_update() {
   fi
 }
 
-# Latest finished conversation in this workspace (init runs excluded).
-# Conversation state belongs to the loop, so continuing one must be a
-# loop affordance; wrappers spawn `agent --resume` per human line.
-agent_resume_msgs() {
-  rd=${AGENT_RUNS_DIR:-$PWD/.agent-runs}
-  [ -d "$rd" ] || return 1
-  best=
-  for r in "$rd"/*; do
-    [ -d "$r" ] || continue
-    case $r in
-      *-init) continue ;;
-    esac
-    [ -f "$r/messages.json" ] || continue
-    best=$r/messages.json
-  done
-  [ -n "$best" ] || return 1
-  printf '%s\n' "$best"
+# Standalone seed entry. The shared engine above remains the only agent loop.
+SEED_VERSION=1
+SELF=$(CDPATH= cd "$(dirname "$0")" && pwd -P)/$(basename "$0")
+LAUNCH_CWD=$(pwd -P)
+# Freeze the caller-visible command search path before ensure_jq may add a
+# private runtime dependency directory. /ini success is judged against this.
+SEED_LAUNCH_PATH=${PATH:-}
+AGENT_MAX_ROUNDS=${AGENT_MAX_ROUNDS:-20}
+ACTION_TIMEOUT=${SEED_ACTION_TIMEOUT:-180}
+MAX_OBS_BYTES=${SEED_MAX_OBS_BYTES:-16384}
+HTTP_TIMEOUT=${SEED_HTTP_TIMEOUT:-300}
+HTTP_STALL=${SEED_HTTP_STALL:-300}
+
+seed_usage() {
+  printf 'usage: sh seed.sh <channel|api-url> <API_KEY> [model]\n' >&2
 }
 
-agent_main() {
-  INSTALL=$(product_root)
-  ensure_jq
-  load_env
-  disable_thinking
-  agent_ensure_init
-  # Conversation prints the final answer once. Live delta echo stays off
-  # here; init turns it on for its own ceremony inside agent_ensure_init.
-  SEED_STREAM=1
-  SEED_STREAM_PRINT=0
-  export SEED_STREAM SEED_STREAM_PRINT
-  resume=0
-  if [ "${1:-}" = --resume ]; then
-    resume=1; shift
+seed_help() {
+  printf '%s\n' \
+    'seed: enter an ordinary task to let the agent work in the launch directory.' \
+    '/help  show this help without calling the model' \
+    '/ini   ask the agent to install the global command seed, then verify it'
+}
+
+seed_state_root() {
+  if [ -n "${SEED_HOME:-}" ]; then
+    printf '%s\n' "$SEED_HOME"
+  else
+    [ -n "${HOME:-}" ] || die 'HOME is unset; set SEED_HOME' 64
+    printf '%s/.seed\n' "$HOME"
   fi
+}
+
+seed_probe() {
+  state=$(seed_state_root)
+  case $state in
+    /*) ;;
+    *) state=$LAUNCH_CWD/$state ;;
+  esac
+  printf 'seed.identity=seed\n'
+  printf 'seed.version=%s\n' "$SEED_VERSION"
+  printf 'seed.state=%s\n' "$state"
+  printf 'seed.workspace=%s\n' "$LAUNCH_CWD"
+}
+
+seed_save_config() {
+  mkdir -p "$INSTALL"
+  write_env_file "$INSTALL/.env"
+}
+
+seed_load_or_activate() {
+  case $# in
+    0)
+      ensure_jq
+      if [ -z "${LLM_API_KEY:-}" ] && [ -f "$INSTALL/.env" ]; then
+        set -a
+        . "$INSTALL/.env"
+        set +a
+      fi
+      [ -n "${LLM_API_KEY:-}" ] || die 'first run: sh seed.sh deepseek <API_KEY>' 64
+      LLM_PROVIDER=${LLM_PROVIDER:-deepseek}
+      LLM_API_URL=${LLM_API_URL:-https://api.deepseek.com/chat/completions}
+      LLM_MODEL=${LLM_MODEL:-deepseek-v4-flash}
+      LLM_EXTRA=${LLM_EXTRA:-'{}'}
+      ;;
+    2|3)
+      ensure_jq
+      resolve_provider "$1" "$2" "${3:-}"
+      seed_save_config
+      ;;
+    *) seed_usage; exit 64 ;;
+  esac
+  disable_thinking
+}
+
+seed_install_prompt() {
+  receipt=$INSTALL/install-result.json
+  cat <<EOF
+Install this already-running standalone seed runtime as a global command named seed.
+
+This is an explicitly authorized installation operation. Inspect the live POSIX environment and PATH with the shell tool. Choose a user-owned, writable installation method appropriate to the environment. You may copy the runtime, make a symbolic link, or create a tiny POSIX /bin/sh shim. Do not use sudo, do not modify another seed installation, and never read or print API keys or .env files.
+
+Runtime source: $SELF
+State directory: $INSTALL
+Required receipt: $receipt
+Stable original launch PATH: $SEED_LAUNCH_PATH
+Current internal runtime PATH: $PATH
+
+Only the stable original launch PATH is accepted as proof that the command remains reachable after this seed process exits. The runtime may have temporarily prepended directories such as the state directory's bin subdirectory solely to host dependencies. Do not install seed into a directory found only in the current internal runtime PATH. A future-login-only profile change is not enough unless reachability can be proven now through the stable original launch PATH.
+
+Before finishing, use the shell tool to write the receipt as one JSON object with exactly these required string fields (extra fields are allowed):
+  {"command":"seed","entry":"/absolute/path/to/the/executable-entry"}
+The entry must be the actual executable path selected for the seed command. Do not claim success unless the files and receipt exist. The outer runtime will independently validate everything after this turn.
+EOF
+}
+
+seed_validate_install() {
+  receipt=$INSTALL/install-result.json
+  [ -f "$receipt" ] || { printf 'error: install receipt missing\n' >&2; return 76; }
+  if ! jq -e '.command == "seed" and (.entry | type == "string") and (.entry | length > 1)' \
+      "$receipt" >/dev/null 2>&1; then
+    printf 'error: install receipt invalid\n' >&2
+    return 76
+  fi
+  entry=$(jq -r '.entry' "$receipt")
+  case $entry in
+    /*) ;;
+    *) printf 'error: install entry is not absolute\n' >&2; return 76 ;;
+  esac
+  case /$entry/ in
+    */../*|*/./*) printf 'error: install entry is unsafe\n' >&2; return 76 ;;
+  esac
+  case $entry in
+    *"
+"*) printf 'error: install entry is unsafe\n' >&2; return 76 ;;
+  esac
+  [ -f "$entry" ] && [ -x "$entry" ] || {
+    printf 'error: install entry is not executable\n' >&2
+    return 76
+  }
+  resolved=$(PATH=$SEED_LAUNCH_PATH command -v seed 2>/dev/null || true)
+  [ "$resolved" = "$entry" ] || {
+    printf 'error: installed seed is not the PATH entry\n' >&2
+    return 76
+  }
+  first=$(sed -n '1p' "$entry" 2>/dev/null || true)
+  case $first in
+    '#!'*sh*)
+      /bin/sh -n "$entry" >/dev/null 2>&1 || {
+        printf 'error: install entry failed syntax check\n' >&2
+        return 76
+      } ;;
+  esac
+  probe=$(PATH=$SEED_LAUNCH_PATH SEED_HOME=$INSTALL "$resolved" --probe 2>/dev/null) || {
+    printf 'error: install entry probe failed\n' >&2
+    return 76
+  }
+  printf '%s\n' "$probe" | grep -qx 'seed.identity=seed' || {
+    printf 'error: install entry identity mismatch\n' >&2
+    return 76
+  }
+  printf '%s\n' "$probe" | grep -qx "seed.version=$SEED_VERSION" || {
+    printf 'error: install entry version mismatch\n' >&2
+    return 76
+  }
+  printf '%s\n' "$probe" | grep -qxF "seed.state=$INSTALL" || {
+    printf 'error: install entry state mismatch\n' >&2
+    return 76
+  }
+  printf 'installed: %s\n' "$entry" >&2
+}
+
+seed_install_global() {
+  ev=${AGENT_RUNS_DIR:-$PWD/.agent-runs}/$(date -u +%Y%m%dT%H%M%SZ)-$$-ini
+  sess=$ev/session
+  mkdir -p "$ev"
+  rm -f "$INSTALL/install-result.json"
+  shell_init "$sess" "$PWD"
+  is=0
+  run_loop "$(product_system)" "$(seed_install_prompt)" "$sess" "$ev" "$AGENT_MAX_ROUNDS" 0 || is=$?
+  shell_stop "$sess" 2>/dev/null || :
+  [ "$is" -eq 0 ] || { printf 'error: global install model turn failed\n' >&2; return "$is"; }
+  seed_validate_install
+}
+
+seed_run_task() {
+  task=$1
+  case $task in
+    /help) seed_help; return 0 ;;
+    /ini) seed_install_global; return $? ;;
+  esac
+  evn=$((evn + 1))
+  ev=${AGENT_RUNS_DIR:-$PWD/.agent-runs}/$(date -u +%Y%m%dT%H%M%SZ)-$$-$evn
+  mkdir -p "$ev"
+  if [ -n "${last_msgs:-}" ] && [ -s "$last_msgs" ]; then
+    strip_msg_thinking "$last_msgs" "$ev/messages.json"
+  fi
+  if [ ! -f "$sess/alive" ]; then
+    sess=$ev/session
+    shell_init "$sess" "$PWD"
+  fi
+  rs=0
+  run_loop "$(product_system)" "$task" "$sess" "$ev" "$AGENT_MAX_ROUNDS" 1 || rs=$?
+  last_msgs=$ev/messages.json
+  return "$rs"
+}
+
+seed_main() {
   oneshot=0
   task=
   if [ "${1:-}" = --oneshot ] || [ "${1:-}" = -p ]; then
-    oneshot=1; shift; task=$*
-  elif [ "$#" -ge 1 ]; then
-    oneshot=1; task=$*
+    oneshot=1
+    shift
+    task=$*
+    set --
   fi
-  if [ "$oneshot" -eq 0 ]; then
-    printf '> ' >&2
-    if ! IFS= read -r line; then printf '\n' >&2; exit 0; fi
-    [ -n "$line" ] || exit 0
-    task=$line
-  fi
-  evn=1
-  ev=${AGENT_RUNS_DIR:-$PWD/.agent-runs}/$(date -u +%Y%m%dT%H%M%SZ)-$$-$evn
-  sess=$ev/session
-  mkdir -p "$ev"
-  if [ "$resume" -eq 1 ]; then
-    prev=$(agent_resume_msgs 2>/dev/null || :)
-    if [ -n "$prev" ]; then
-      strip_msg_thinking "$prev" "$ev/messages.json"
-    fi
-  fi
+  state=$(seed_state_root)
+  mkdir -p "$state"
+  INSTALL=$(CDPATH= cd "$state" && pwd -P)
+  export SEED_HOME=$INSTALL
+  seed_load_or_activate "$@"
+  agent_ensure_init
+  SEED_STREAM=1
+  SEED_STREAM_PRINT=0
+  export SEED_STREAM SEED_STREAM_PRINT
+  evn=0
+  last_msgs=
+  sess=${AGENT_RUNS_DIR:-$PWD/.agent-runs}/seed-session-$$
   shell_init "$sess" "$PWD"
-  # || capture: run_loop flips errexit internally, so a set +e guard here
-  # would not survive a model error; the window must outlive one bad turn.
-  as=0
-  run_loop "$(product_system)" "$task" "$sess" "$ev" "$AGENT_MAX_ROUNDS" 1 || as=$?
-  last_msgs=$ev/messages.json
   if [ "$oneshot" -eq 1 ]; then
-    shell_stop "$sess"
-    exit "$as"
+    st=0
+    seed_run_task "$task" || st=$?
+    shell_stop "$sess" 2>/dev/null || :
+    return "$st"
   fi
   while true; do
     printf '> ' >&2
     if ! IFS= read -r line; then printf '\n' >&2; break; fi
     [ -n "$line" ] || break
-    evn=$((evn + 1))
-    ev=${AGENT_RUNS_DIR:-$PWD/.agent-runs}/$(date -u +%Y%m%dT%H%M%SZ)-$$-$evn
-    mkdir -p "$ev"
-    if [ -s "$last_msgs" ]; then
-      strip_msg_thinking "$last_msgs" "$ev/messages.json"
+    line_status=0
+    seed_run_task "$line" || line_status=$?
+    if [ "$line" = /ini ] && [ "$line_status" -ne 0 ]; then
+      shell_stop "$sess" 2>/dev/null || :
+      return "$line_status"
     fi
-    if [ ! -f "$sess/alive" ]; then
-      sess=$ev/session
-      shell_init "$sess" "$PWD"
-    fi
-    run_loop "$(product_system)" "$line" "$sess" "$ev" "$AGENT_MAX_ROUNDS" 1 || :
-    last_msgs=$ev/messages.json
   done
   shell_stop "$sess" 2>/dev/null || :
 }
 
-selftest() {
-  t=$(CDPATH= cd "$(dirname "$SELF")" && pwd -P)/tests/seed-package.sh
-  [ -f "$t" ] || die "offline suite missing: $t (run from repo root)" 69
-  exec /bin/sh "$t"
-}
-
 case ${1:-} in
-  --parse-turn) shift; parse_turn "$1"; exit 0 ;;
-  --parse-stream) shift; parse_stream "$1"; exit 0 ;;
-  --llm) shift; llm_main "$@"; exit 0 ;;
-  --edit) shift; edit_main "$@"; exit 0 ;;
-  --ensure-jq) ensure_jq; exit 0 ;;
-  --update)
-    INSTALL=$(product_root)
-    ensure_jq
-    load_env
-    agent_update
-    exit 0 ;;
-  --shell-init) shift; probe; shell_init "$1" "$2"; exit 0 ;;
-  --shell) shift; shell_run "$1" "$2"; exit 0 ;;
-  --shell-stop) shift; shell_stop "$1"; exit 0 ;;
-  --shell-cli) shift; die 'shell CLI is internal to agent' 64 ;;
-  --agent) shift; agent_main "$@"; exit 0 ;;
-  --selftest) selftest; exit 0 ;;
-  -h|--help) usage; exit 0 ;;
+  --probe) seed_probe; exit 0 ;;
+  --oneshot|-p)
+    # One-shot operation uses the existing saved activation.
+    seed_main "$@"
+    exit $? ;;
+  -*) seed_usage; exit 64 ;;
 esac
 
-case $(basename "$0") in
-  agent|seedagent)
-    agent_main "$@"
-    exit 0 ;;
-esac
-
-GLOBAL=0
-if [ "${1:-}" = --global ]; then GLOBAL=1; shift; fi
-INSTALL=.
-case ${1:-} in
-  '')
-    ensure_jq
-    load_env
-    [ -n "${LLM_API_KEY:-}" ] || die "first run: sh seed.sh deepseek <API_KEY>" 64
-    LLM_PROVIDER=${LLM_PROVIDER:-deepseek}
-    LLM_API_URL=${LLM_API_URL:-https://api.deepseek.com/chat/completions}
-    LLM_MODEL=${LLM_MODEL:-deepseek-v4-flash} ;;
-  -*) usage; exit 64 ;;
-  *)
-    [ "$#" -eq 2 ] || [ "$#" -eq 3 ] || { usage; exit 64; }
-    ensure_jq
-    resolve_provider "$1" "$2" "${3:-}" ;;
-esac
-mkdir -p "$INSTALL"
-INSTALL=$(CDPATH= cd "$INSTALL" && pwd -P)
-install_main
+seed_main "$@"
 

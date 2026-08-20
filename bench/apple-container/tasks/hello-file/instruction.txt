@@ -1,1 +1,1 @@
-Create a file named bench-ok.txt in the current directory. It must contain exactly one line: seed2-ok. Do not create other files. After writing, stop.
+Create a file named bench-ok.txt in the current directory. It must contain exactly one line: seed-ok. Do not create other files. After writing, stop.

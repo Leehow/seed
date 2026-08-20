@@ -18,3 +18,8 @@ agent-store/
 bin/jq
 bin/jq.exe
 bench/apple-container/out/
+bench/harbor/jobs/
+bench/harbor/dataset/
+bench/harbor/tb21/
+bench/harbor/__pycache__/
+bench/harbor/.env.jellytoken

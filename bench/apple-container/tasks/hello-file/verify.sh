@@ -1,7 +1,7 @@
 #!/bin/sh
 set -eu
 ws=$1
-if [ -f "$ws/bench-ok.txt" ] && grep -qx 'seed2-ok' "$ws/bench-ok.txt"; then
+if [ -f "$ws/bench-ok.txt" ] && grep -qx 'seed-ok' "$ws/bench-ok.txt"; then
   printf 'pass\n'
   exit 0
 fi

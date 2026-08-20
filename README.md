@@ -1,50 +1,51 @@
 # slab
 
-一颗 POSIX `/bin/sh` 种子。curl 下来，对着项目 `sh` 一下就能当 coding agent 用。
+一颗可直接运行的 POSIX `/bin/sh` coding-agent 种子。
 
-只要 `/bin/sh` 和 curl。Linux、macOS、WSL、Git Bash 可以。原生 cmd / PowerShell 不行。没有 jq 会自己拉。
+仓库根上的 [`seed.sh`](seed.sh) 同时是**唯一产品、唯一运行时、唯一源码**。没有生成步骤，没有 build/pack 双轨，也不会再安装出 `bin/agent`。运行只需要 `/bin/sh`、curl 和 jq；缺 jq 时种子会下载兼容二进制。
 
-## 用
+支持 Linux、macOS、WSL、Git Bash；不支持原生 cmd / PowerShell。
 
-先把 `seed2.sh` 拉到本地，再启动。不要 `curl | sh`。
+## 使用
+
+先下载文件，不要 `curl | sh`：
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/Leehow/slab/main/seed2.sh -o seed2.sh
+curl -fsSL https://raw.githubusercontent.com/Leehow/slab/main/seed.sh -o seed.sh
 cd 你的项目
-sh seed2.sh deepseek sk-你的key
+/bin/sh /下载路径/seed.sh deepseek sk-你的key
 ```
 
-第一次把 key 写进 `~/.seed2/.env`，探测这台机器，然后出现 `>`。在提示符里说话即可。空行或 Ctrl-D 离开。
-
-之后换目录再开，不用再带 key：
+第一次会把配置写入 `~/.seed/.env`，初始化机器能力索引，然后进入 `>`。空行或 Ctrl-D 退出。之后在任意项目目录直接运行同一个文件：
 
 ```sh
-sh /刚才下载的路径/seed2.sh
+/bin/sh /下载路径/seed.sh
+/bin/sh /下载路径/seed.sh -p "把安装说明写进 README"
 ```
 
-一次性任务：
+任意 OpenAI 兼容接口（第三参模型名可省）：
 
 ```sh
-sh seed2.sh -p "把安装说明写进 README"
+/bin/sh seed.sh https://api.example.com/v1 sk-xxxx 模型名
 ```
 
-任意 OpenAI 兼容接口（第三参是模型，可省）：
+在交互提示符输入 `/ini`，模型会尝试把当前 runtime 安装成全局命令；外壳会独立检查回执、PATH 和 probe。成功后：
 
 ```sh
-sh seed2.sh https://api.example.com/v1 sk-xxxx 模型名
+seed
+seed -p "任务"
 ```
 
-想装成全局命令：在 `>` 里输入 `/ini`。磁盘验收通过后，任意目录：
+工作区始终是启动命令时的当前目录。状态目录默认 `~/.seed`，可用 `SEED_HOME` 隔离。不要提交 `.env` 或运行证据。
+
+## 开发
+
+直接修改根 [`seed.sh`](seed.sh)，然后运行：
 
 ```sh
-seed2
-seed2 -p "任务"
+/bin/sh -n seed.sh
+/bin/sh tests/seed-package.sh
+git diff --check
 ```
 
-工作区是启动时的当前目录。状态在 `~/.seed2`，不进项目。不要把 key 提交进 git。
-
-## 这是什么
-
-一个文件就是完整 runtime。两个 API 工具：持久 shell、精确替换 edit。其余能力靠本机已有的 CLI 和线上提示词自己长。
-
-完整源码在 [`source`](https://github.com/Leehow/slab/tree/source) 分支。给改仓库的人看 [AGENTS.md](https://github.com/Leehow/slab/blob/source/AGENTS.md)。
+agent catalog 仍在 [`plugins/agent/`](plugins/agent/)；其中发布的是提示词，不是另一套 runtime。设计与维护约束见 [AGENTS.md](AGENTS.md) 和 [docs/理念与设计.md](docs/理念与设计.md)。
