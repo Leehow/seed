@@ -1,13 +1,7 @@
-jq binaries for the seed fallback mirror.
+Optional/manual jq binaries. seed.sh does not fetch from this directory by default.
 
-Served at the same plugin root as seed/ and agent/:
-  https://raw.githubusercontent.com/Leehow/slab/main/plugins/jq/jq-linux-amd64
-  https://raw.githubusercontent.com/Leehow/slab/main/plugins/jq/jq-linux-arm64
-  https://raw.githubusercontent.com/Leehow/slab/main/plugins/jq/jq-macos-amd64
-  https://raw.githubusercontent.com/Leehow/slab/main/plugins/jq/jq-macos-arm64
-  https://raw.githubusercontent.com/Leehow/slab/main/plugins/jq/jq-windows-amd64.exe
+When jq is missing, seed downloads the matching binary from official GitHub Releases
+by OS/arch (jqlang/jq, default 1.7.1), unless SEED_JQ_URL overrides the URL.
 
-Populate:
+This directory can still be populated for manual use:
   sh plugins/jq/fetch.sh
-
-seed.sh tries this directory first, then GitHub.

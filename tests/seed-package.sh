@@ -35,6 +35,44 @@ if grep -q "SEED_PLUGIN_ROOT:-https://raw.githubusercontent.com/Leehow/slab/main
 else
   bad 'default plugin_root is GitHub raw plugins'
 fi
+if grep -q "https://github.com/jqlang/jq/releases/download/jq-%s/%s" "$SEED" \
+  && ! grep -q 'jq_mirror_url' "$SEED" \
+  && ! grep -q 'plugin_join "$(plugin_root)" "jq/' "$SEED"; then
+  ok 'jq default source is official GitHub Releases'
+else
+  bad 'jq default source is official GitHub Releases'
+fi
+
+# Offline asset/URL mapping: fake uname, source only the jq helpers.
+sed -n '/^jq_asset_name()/,/^}$/p; /^jq_official_url()/,/^}$/p' "$SEED" > "$t/jqfn.sh"
+mkdir -p "$t/uname"
+cat > "$t/uname/uname" <<'UNAME'
+#!/bin/sh
+case ${1:-} in
+  -s) printf '%s\n' "${FAKE_UNAME_S:-Linux}" ;;
+  -m) printf '%s\n' "${FAKE_UNAME_M:-x86_64}" ;;
+  *) printf '%s\n' "${FAKE_UNAME_S:-Linux}" ;;
+esac
+UNAME
+chmod 755 "$t/uname/uname"
+jq_map_ok=1
+check_jq_map() {
+  os=$1 arch=$2 want=$3
+  got=$(FAKE_UNAME_S=$os FAKE_UNAME_M=$arch PATH="$t/uname:$PATH" SEED_JQ_VER=1.7.1 \
+    /bin/sh -c '. "$1"; jq_official_url' _ "$t/jqfn.sh") || return 1
+  [ "$got" = "https://github.com/jqlang/jq/releases/download/jq-1.7.1/$want" ]
+}
+check_jq_map Linux x86_64 jq-linux-amd64 || jq_map_ok=0
+check_jq_map Linux amd64 jq-linux-amd64 || jq_map_ok=0
+check_jq_map Linux aarch64 jq-linux-arm64 || jq_map_ok=0
+check_jq_map Darwin arm64 jq-macos-arm64 || jq_map_ok=0
+check_jq_map Darwin x86_64 jq-macos-amd64 || jq_map_ok=0
+check_jq_map MINGW64_NT amd64 jq-windows-amd64.exe || jq_map_ok=0
+if [ "$jq_map_ok" = 1 ]; then
+  ok 'jq asset maps OS/arch to official GitHub URL'
+else
+  bad 'jq asset maps OS/arch to official GitHub URL'
+fi
 
 mkdir -p "$t/tools" "$t/work" "$t/state" "$t/plugin/agent"
 work=$(CDPATH= cd "$t/work" && pwd -P)

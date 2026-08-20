@@ -51,11 +51,6 @@ jq_official_url() {
   printf 'https://github.com/jqlang/jq/releases/download/jq-%s/%s\n' "$ver" "$asset"
 }
 
-jq_mirror_url() {
-  asset=$(jq_asset_name) || return 1
-  plugin_join "$(plugin_root)" "jq/$asset"
-}
-
 jq_fetch() {
   url=$1
   dest=$2
@@ -111,15 +106,9 @@ ensure_jq() {
   else
     official=${SEED_JQ_OFFICIAL_URL:-}
     [ -n "$official" ] || official=$(jq_official_url) || official=
-    mirror=$(jq_mirror_url) || mirror=
+    [ -n "$official" ] || die "need jq (unsupported platform)" 69
     printf 'installing: jq\n' >&2
-    if [ -n "$mirror" ] && jq_fetch "$mirror" "$dest"; then
-      :
-    else
-      [ -n "$official" ] || die "need jq (unsupported platform)" 69
-      printf 'installing: jq (github)\n' >&2
-      jq_fetch "$official" "$dest" || die "need jq (download failed)" 69
-    fi
+    jq_fetch "$official" "$dest" || die "need jq (download failed)" 69
   fi
   PATH=$(CDPATH= cd "$(dirname "$dest")" && pwd):$PATH
   export PATH
