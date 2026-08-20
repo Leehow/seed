@@ -9,7 +9,7 @@
 Works on Linux, macOS, WSL, Git Bash, and Android Termux. Native cmd / PowerShell is not supported.
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/Leehow/slab/main/seed.sh -o seed.sh
+curl -fsSL https://raw.githubusercontent.com/Leehow/seed/main/seed.sh -o seed.sh
 cd your-project
 /bin/sh seed.sh deepseek sk-your-key
 ```
@@ -87,10 +87,10 @@ No human wrote a line of the game. The runtime that did this is the same single 
 
 ## Usage
 
-Download `seed.sh` from GitHub main first — do not `curl | sh`. The plugin catalog is fetched from this repo's raw `plugins/` by default (`https://raw.githubusercontent.com/Leehow/slab/main/plugins`); override with `SEED_PLUGIN_ROOT`.
+Download `seed.sh` from GitHub main first — do not `curl | sh`. The plugin catalog is fetched from this repo's raw `plugins/` by default (`https://raw.githubusercontent.com/Leehow/seed/main/plugins`); override with `SEED_PLUGIN_ROOT`.
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/Leehow/slab/main/seed.sh -o seed.sh
+curl -fsSL https://raw.githubusercontent.com/Leehow/seed/main/seed.sh -o seed.sh
 cd your-project
 /bin/sh /path/to/seed.sh deepseek sk-your-key
 ```

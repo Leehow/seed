@@ -9,7 +9,7 @@
 支持 Linux、macOS、WSL、Git Bash、Android Termux；不支持原生 cmd / PowerShell。
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/Leehow/slab/main/seed.sh -o seed.sh
+curl -fsSL https://raw.githubusercontent.com/Leehow/seed/main/seed.sh -o seed.sh
 cd 你的项目
 /bin/sh seed.sh deepseek sk-你的key
 ```
@@ -87,10 +87,10 @@ cd 你的项目
 
 ## 使用
 
-先从 GitHub main 下载 `seed.sh`，不要 `curl | sh`。插件 catalog 默认从本仓库 raw `plugins/` 拉取（`https://raw.githubusercontent.com/Leehow/slab/main/plugins`）；可用 `SEED_PLUGIN_ROOT` 覆盖。
+先从 GitHub main 下载 `seed.sh`，不要 `curl | sh`。插件 catalog 默认从本仓库 raw `plugins/` 拉取（`https://raw.githubusercontent.com/Leehow/seed/main/plugins`）；可用 `SEED_PLUGIN_ROOT` 覆盖。
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/Leehow/slab/main/seed.sh -o seed.sh
+curl -fsSL https://raw.githubusercontent.com/Leehow/seed/main/seed.sh -o seed.sh
 cd 你的项目
 /bin/sh /下载路径/seed.sh deepseek sk-你的key
 ```

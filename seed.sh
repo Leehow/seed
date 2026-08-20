@@ -156,7 +156,7 @@ ensure_gitignore() {
 }
 
 plugin_root() {
-  printf '%s' "${SEED_PLUGIN_ROOT:-https://raw.githubusercontent.com/Leehow/slab/main/plugins}"
+  printf '%s' "${SEED_PLUGIN_ROOT:-https://raw.githubusercontent.com/Leehow/seed/main/plugins}"
 }
 
 plugin_join() {
