@@ -42,13 +42,13 @@ cd 你的项目
 - 自己修环境：缺 jq 下载 jq，任务需要什么就 `apt-get install` 什么，装之前先查对包名。
 - 探测并复用本机已有的 CLI、解释器、服务，连用途、调用方式、smoke 结果一起登记进能力索引，跨任务摊销探测成本。
 - 把自己安装成全局命令（`/ini`），装完由外壳验收。
-- 跑官方 Terminal-Bench 2.1 全套 89 题（Harbor + Docker，adapter 在 [`bench/harbor/`](bench/harbor/)）。
+- 跑官方 Terminal-Bench 2.1 全套 89 题（Harbor + Docker）：每道题的容器里只放同一份 `seed.sh`。
 
 ## 做过的实验
 
 ### 冷启动与能力索引（Apple container，Debian 12 aarch64）
 
-同一颗种子分别丢进「只有 curl + CA 的干净机」和「预装 git / rg / python3 / jq / openssl / Codex 的富环境」。完整记录见 [`bench/apple-container/COMPARE.md`](bench/apple-container/COMPARE.md)。
+同一颗种子分别丢进「只有 curl + CA 的干净机」和「预装 git / rg / python3 / jq / openssl / Codex 的富环境」。
 
 | 环境 | 题目 | 终态 | 墙钟 | 它实际怎么干的 |
 |---|---|---|---|---|
@@ -62,12 +62,12 @@ cd 你的项目
 
 ### 官方 Terminal-Bench 2.1（Harbor + Docker，89 题）
 
-adapter [`bench/harbor/seed_agent.py`](bench/harbor/seed_agent.py) 把 standalone `seed.sh` 装进每道题的容器（只保证 curl + CA——jq、git、python 是种子自己的事），对官方原题指令 `--oneshot`，官方 verifier 打分：
+每道题的容器只拿到 standalone `seed.sh` 以及 curl 和 CA——jq、git、python 是种子自己的事。对官方原题指令 `--oneshot`，官方 verifier 打分：
 
 - seed + `deepseek-v4-pro`，k=1 一遍分 **Mean 0.360（32/89）**。同任务集、同 verifier，但是单次尝试分，不是 k=5 榜单口径——我们照实标注。
 - 第二轮 `deepseek-v4-flash`（修复流式停滞截断、加时间预算提示后）进行中，中期通过率高于第一轮。
-- 同模型对照已接好：`sh bench/harbor/run.sh --agent mini-swe-agent --all` 和 `--agent terminus-2`。
-- 失败归因公开不藏：三大类是「没交卷」「时间耗尽没做完」「宣布完成但验收不过」。一个值得说的发现：早期流式 curl 的 `--max-time` 会掐断模型的长思考、把锅错算到模型头上——现已改为停滞检测，并写进回归测试。
+- 同模型对照（mini-swe-agent、terminus-2）按同一任务集、同一 verifier 排队。
+- 失败归因公开不藏：三大类是「没交卷」「时间耗尽没做完」「宣布完成但验收不过」。一个值得说的发现：早期流式 curl 的 `--max-time` 会掐断模型的长思考、把锅错算到模型头上——现已改为停滞检测。
 
 ### 一台安卓平板造了个 3D 游戏
 
@@ -83,7 +83,7 @@ adapter [`bench/harbor/seed_agent.py`](bench/harbor/seed_agent.py) 把 standalon
 ### 安装公证与离线合同
 
 - `/ini` 的验收对抗过假回执和 PATH 污染：模型说装好了没有用；外壳用启动时冻结的 PATH 重新解析 `seed`，再跑 `--probe` 核对身份。
-- [`tests/seed-package.sh`](tests/seed-package.sh) 是完全离线的产品合同（假 plugin transport + LLM stub，不联网、不要真 key），覆盖 20+ 项：SSE 分片合并、断流触发重试、空回复不当终稿等。
+- 离线产品合同（假 plugin transport + LLM stub，不联网、不要真 key）覆盖 20+ 项：SSE 分片合并、断流触发重试、空回复不当终稿等。
 
 ## 使用
 
@@ -119,27 +119,23 @@ seed -p "任务"
 
 ## 开发
 
-直接修改根 [`seed.sh`](seed.sh)，然后运行：
+这个 GitHub 树**就是**产品：[`seed.sh`](seed.sh) 加上提示词 catalog。改种子，然后：
 
 ```sh
 /bin/sh -n seed.sh
-/bin/sh tests/seed-package.sh
-git diff --check
 ```
 
-agent catalog 在 [`plugins/agent/`](plugins/agent/)，发布的是提示词，不是另一套 runtime。设计与维护约束见 [AGENTS.md](AGENTS.md) 和 [docs/理念与设计.md](docs/理念与设计.md)。
+[`plugins/agent/`](plugins/agent/) 里发布的是提示词，不是另一套 runtime。换脾气、换扩展，只改那些 JSON，不要加厚 `seed.sh`。
 
-## 仓库结构
+## 这个仓库里有什么
 
 | 路径 | 角色 |
 |---|---|
-| `seed.sh` | standalone runtime，也是唯一可编辑实现 |
-| `tests/seed-package.sh` | 完全离线的产品合同 |
-| `plugins/agent/` | 初始化与懒构建扩展的提示词 catalog |
-| `plugins/seed/` | provider / model catalog |
-| `bench/apple-container/` | 冷启动 / 富环境 / 索引摊销 bench |
-| `bench/harbor/` | 官方 Terminal-Bench 2.1 adapter 与驱动 |
-| `docs/理念与设计.md` | 当前理念和运行契约 |
+| [`seed.sh`](seed.sh) | 完整 runtime——下载就能跑 |
+| [`plugins/agent/`](plugins/agent/) | 提示词 catalog：初始化、skills、commands、懒构建扩展 |
+| [`plugins/seed/`](plugins/seed/) | provider / model catalog |
+| [`plugins/jq/`](plugins/jq/) | jq 回退说明与拉取脚本 |
+| [`LICENSE`](LICENSE) | MIT |
 
 ## 诚实的边界
 

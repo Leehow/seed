@@ -42,13 +42,13 @@ The answer so far: yes, and the constraint turns out to be a feature. A single p
 - Repair its own environment: fetch jq when missing, `apt-get install` what a task needs, look up the right package name before installing.
 - Probe and reuse whatever the host already has (CLIs, interpreters, services), recording each capability with usage, invocation, and smoke-test results in a machine index that amortizes across tasks.
 - Install itself as a global command (`/ini`) with shell-side acceptance testing.
-- Run the official Terminal-Bench 2.1 suite (Harbor + Docker, all 89 tasks) via the adapter in [`bench/harbor/`](bench/harbor/).
+- Run the official Terminal-Bench 2.1 suite (Harbor + Docker, all 89 tasks) by dropping the same `seed.sh` into each task container.
 
 ## Experiments
 
 ### Cold start and capability indexing (Apple container, Debian 12 aarch64)
 
-The same seed was dropped into a **clean** box (only curl + CA certificates) and a **rich** box (git / rg / python3 / jq / openssl / Codex preinstalled). Full logs in [`bench/apple-container/COMPARE.md`](bench/apple-container/COMPARE.md).
+The same seed was dropped into a **clean** box (only curl + CA certificates) and a **rich** box (git / rg / python3 / jq / openssl / Codex preinstalled).
 
 | Environment | Task | Result | Wall clock | What it actually did |
 |---|---|---|---|---|
@@ -62,12 +62,12 @@ Index amortization: paying for a full capability census up front (54s, registeri
 
 ### Official Terminal-Bench 2.1 (Harbor + Docker, 89 tasks)
 
-The adapter [`bench/harbor/seed_agent.py`](bench/harbor/seed_agent.py) installs the standalone `seed.sh` into each task container (guaranteeing only curl + CA — jq, git, python are the seed's own problem), runs `--oneshot` on the unmodified official instruction, and lets the official verifier grade.
+Each task container gets only the standalone `seed.sh` plus curl and CA certificates — jq, git, and python are the seed's own problem. It runs `--oneshot` on the unmodified official instruction, and the official verifier grades.
 
 - seed + `deepseek-v4-pro`, k=1 single pass: **Mean 0.360 (32/89)**. This is the full official task set with the official verifier — but a single-attempt score, not the k=5 leaderboard protocol. We label it accordingly.
 - A second full run with `deepseek-v4-flash` (after fixing a streaming-stall bug and adding a time-budget preamble) is in progress, tracking above the first run at the midpoint.
-- Same-model baselines are wired up for comparison runs: `sh bench/harbor/run.sh --agent mini-swe-agent --all` and `--agent terminus-2`.
-- Failure analysis is published, not hidden: the three dominant modes are "never submitted", "ran out of time mid-work", and "declared done but failed verification". One notable finding: an earlier `--max-time` on the streaming curl was decapitating long model thinking and mis-charging the failure to the model — now replaced by stall detection, with regression tests.
+- Same-model baselines (mini-swe-agent, terminus-2) are queued on the same task set and verifier.
+- Failure analysis is published, not hidden: the three dominant modes are "never submitted", "ran out of time mid-work", and "declared done but failed verification". One notable finding: an earlier `--max-time` on the streaming curl was decapitating long model thinking and mis-charging the failure to the model — now replaced by stall detection.
 
 ### An Android tablet builds a 3D game
 
@@ -83,7 +83,7 @@ No human wrote a line of the game. The runtime that did this is the same single 
 ### Notarized install and offline contract tests
 
 - `/ini` acceptance has been tested against fake receipts and PATH pollution: the model claiming success does nothing; the shell re-resolves `seed` with the frozen pre-run PATH and re-checks identity via `--probe`.
-- [`tests/seed-package.sh`](tests/seed-package.sh) is a fully offline product contract (fake plugin transport + LLM stub; no network, no real keys) covering 20+ cases: SSE chunk merging, truncated streams triggering a retry, empty replies never being accepted as a final answer, and more.
+- An offline product contract (fake plugin transport + LLM stub; no network, no real keys) covers 20+ cases: SSE chunk merging, truncated streams triggering a retry, empty replies never being accepted as a final answer, and more.
 
 ## Usage
 
@@ -119,27 +119,23 @@ The workspace is always the directory you launched from. State lives in `~/.seed
 
 ## Development
 
-Edit the root [`seed.sh`](seed.sh) directly, then run:
+This GitHub tree **is** the product: [`seed.sh`](seed.sh) plus the prompt catalog. Edit the seed, then:
 
 ```sh
 /bin/sh -n seed.sh
-/bin/sh tests/seed-package.sh
-git diff --check
 ```
 
-The agent catalog lives in [`plugins/agent/`](plugins/agent/) and publishes prompts, not a second runtime. Design and maintenance constraints: [AGENTS.md](AGENTS.md) and [docs/理念与设计.md](docs/理念与设计.md).
+The catalog in [`plugins/agent/`](plugins/agent/) publishes prompts, not a second runtime. Change the agent's temperament by changing those JSON files; do not fatten `seed.sh`.
 
-## Repository layout
+## What's in this repo
 
 | Path | Role |
 |---|---|
-| `seed.sh` | the standalone runtime — also the only editable implementation |
-| `tests/seed-package.sh` | fully offline product contract |
-| `plugins/agent/` | prompt catalog for initialization and lazily-grown extensions |
-| `plugins/seed/` | provider / model catalog |
-| `bench/apple-container/` | cold-start / rich-environment / amortization bench |
-| `bench/harbor/` | official Terminal-Bench 2.1 adapter and drivers |
-| `docs/理念与设计.md` | philosophy and runtime contract |
+| [`seed.sh`](seed.sh) | the whole runtime — download it and run |
+| [`plugins/agent/`](plugins/agent/) | prompt catalog: init, skills, commands, lazy extensions |
+| [`plugins/seed/`](plugins/seed/) | provider / model catalog |
+| [`plugins/jq/`](plugins/jq/) | jq fallback notes and fetch helper |
+| [`LICENSE`](LICENSE) | MIT |
 
 ## Honest limits
 
