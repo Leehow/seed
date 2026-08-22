@@ -1345,6 +1345,19 @@ agent_fetch_required() {
   agent_fetch_pack 1 "$index"
 }
 
+# agent_update dies on a bad fetch (agent_plugin_get). A ready machine must
+# still start with no network, so run it in a subshell: the die exits only
+# the child and a failed refresh is a skipped refresh, never a failed launch.
+agent_try_update() {
+  [ "${SEED_SKIP_UPDATE:-}" = 1 ] && return 0
+  [ -f "$INSTALL/agent-store/catalog.json" ] || return 0
+  if ( agent_update ) 2>/dev/null; then
+    return 0
+  fi
+  printf 'note: plugin catalog refresh skipped\n' >&2
+  return 0
+}
+
 agent_place_trees() {
   store=$INSTALL/agent-store
   pack=$store/plugins/init.json
@@ -1432,6 +1445,10 @@ agent_ensure_init() {
   [ "${SLAB_SKIP_INIT:-}" = 1 ] && return 0
   agent_repair_machine_tree || true
   if agent_check_machine_tree; then
+    # A ready machine never re-ran init, so without this the catalog stayed
+    # frozen at whatever version first installed it and a newly published
+    # optional block could never reach an existing install.
+    agent_try_update
     # Engine owns system.tools. Re-probe every ready launch so a model
     # overwrite or a later apt install cannot leave stale false slots.
     agent_probe_tools

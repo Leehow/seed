@@ -5,14 +5,44 @@
     "version": "1",
     "updated": "",
     "system": {
-      "retrieve": "The task is the human's last message. Do not replace it with index key names. A skill catalog may already be in the system message; match name and description there first. Never cat the entire index. jq this index for ok entries that match the human's words. Before acting, jq the Project memory path from the system message for notes and facts whose titles match the human's words; when a hit has a path, cat that file; never cat the whole memory file. When the human says 记住, 以后都, or 别再, write one entry there with fields title, kind (lesson, preference, decision, or fact), text or path, utc, and ok set to true (boolean). Match ok skills by name, description, or path; if one matches, cat that directory's SKILL.md and follow it using only shell and edit. If the task needs a URL or current web facts, jq system.web for ok fetch and follow that entry's use field via the shell tool. Open pages with the human's words and URLs first. Do not rewrite the query into local path names (agent-store, catalog.json, init.json). For skill or SKILL.md questions, fetch https://agentskills.io/specification first; do not search using local path names. Use ok system.tools and system.other via the shell tool; they are not new API tools. When a task needs a capability this index lacks: search locally first (command -v and common paths), then the web via ok entries in system.web or system.resources of kind search; smoke-test what you find, register it in system.resources as {name, kind, path or url, purpose, use, needs, ok, note, probed}, then use it. When you consult an external source for facts (documentation, specs, formulas), register it too: kind source, the URL as path, probed as the fetch time. Prefer an existing tool, library, or service over building your own; search before you build. Resources that need a key stay ok false until the human provides it; never invent keys. If a registered entry later fails its smoke, mark ok false with a note; do not delete it. To delegate to a subagent, run the global seed --oneshot with a self-contained task; if seed is not on PATH, ask the human to run /ini first. A registered host agent CLI may carry it too. Never simulate a subagent with a script you wrote yourself. Do not copy skill bodies into the tree. The seed-agent blocks (skills, commands, models, plugins, delegate) are built lazily, only when the task needs them: jq the local catalog.json optional.seed_agent, GET ${SEED_PLUGIN_ROOT:-https://raw.githubusercontent.com/Leehow/seed/main/plugins}/agent/<that file>, save it under agent-store/plugins/, and follow it; track block progress in ours.seed_agent (done only after that block's checks pass). On oneshot turns, never build blocks; just do the task. Never delay a task to build blocks it does not need. Agent plugin files are prompts only; invent implementations on this machine with shell and edit; do not expect shipped scripts to copy. Do not write a TUI or a wrapper around the runtime; the interface stays seed (or /bin/sh seed.sh). If the human message starts with /, treat it as a slash command from agent-store/seed-agent/commands.json; if that table does not exist yet, build the commands block first; do not treat a / message as a coding task. If the human says 重做 or rebuild plus a block name (skills, commands, models, plugins, delegate), GET that block's prompt again and follow it; do not keep a file that fails the new checks. Do not rewrite the human's task into index key names. Do not put API keys in the tree.",
+      "retrieve": "The task is the human's last message. Do not replace it with index key names. A skill catalog may already be in the system message; match name and description there first. Never cat the entire index. jq this index for ok entries that match the human's words. Before acting, jq the Project memory path from the system message for notes and facts whose titles match the human's words; when a hit has a path, cat that file; never cat the whole memory file. When the human says 记住, 以后都, or 别再, write one entry there with fields title, kind (lesson, preference, decision, or fact), text or path, utc, and ok set to true (boolean). Match ok skills by name, description, or path; if one matches, cat that directory's SKILL.md and follow it using only shell and edit. If the task needs a URL or current web facts, jq system.web for ok fetch and follow that entry's use field via the shell tool. Open pages with the human's words and URLs first. Do not rewrite the query into local path names (agent-store, catalog.json, init.json). For skill or SKILL.md questions, fetch https://agentskills.io/specification first; do not search using local path names. Use ok system.tools and system.other via the shell tool; they are not new API tools. When a task needs a capability this index lacks: search locally first (command -v and common paths), then the web via ok entries in system.web or system.resources of kind search; smoke-test what you find, register it in system.resources as {name, kind, path or url, purpose, use, needs, ok, note, probed}, then use it. When you consult an external source for facts (documentation, specs, formulas), register it too: kind source, the URL as path, probed as the fetch time. Prefer an existing tool, library, or service over building your own; search before you build. Resources that need a key stay ok false until the human provides it; never invent keys. If a registered entry later fails its smoke, mark ok false with a note; do not delete it. To delegate to a subagent, run the global seed --oneshot with a self-contained task; if seed is not on PATH, ask the human to run /ini first. A registered host agent CLI may carry it too. Never simulate a subagent with a script you wrote yourself. Do not copy skill bodies into the tree. Optional plugin blocks are built lazily, only when the task needs them. jq the local catalog.json optional: it is a map of block name to file name, and every entry in it is available, not just the ones named here. When the human's words match a block name or what that block plainly does, GET ${SEED_PLUGIN_ROOT:-https://raw.githubusercontent.com/Leehow/seed/main/plugins}/agent/<that file>, save it under agent-store/plugins/, and follow it. seed_agent holds the runtime's own blocks (skills, commands, models, plugins, delegate) and tracks progress in ours.seed_agent; any other optional block tracks its own key under ours, named after the block. A block is done only after that block's own checks pass. On oneshot turns, never build blocks; just do the task. Never delay a task to build blocks it does not need. Agent plugin files are prompts only; invent implementations on this machine with shell and edit; do not expect shipped scripts to copy. Do not write a TUI or a wrapper around the runtime; the interface stays seed (or /bin/sh seed.sh). If the human message starts with /, treat it as a slash command from agent-store/seed-agent/commands.json; if that table does not exist yet, build the commands block first; do not treat a / message as a coding task. If the human says 重做 or rebuild plus a block name (skills, commands, models, plugins, delegate), GET that block's prompt again and follow it; do not keep a file that fails the new checks. Do not rewrite the human's task into index key names. Do not put API keys in the tree.",
       "tools": {
-        "sh": { "present": false, "path": "", "ok": false, "note": "" },
-        "curl": { "present": false, "path": "", "ok": false, "note": "" },
-        "jq": { "present": false, "path": "", "ok": false, "note": "" },
-        "rg": { "present": false, "path": "", "ok": false, "note": "" },
-        "git": { "present": false, "path": "", "ok": false, "note": "" },
-        "python": { "present": false, "path": "", "ok": false, "note": "" }
+        "sh": {
+          "present": false,
+          "path": "",
+          "ok": false,
+          "note": ""
+        },
+        "curl": {
+          "present": false,
+          "path": "",
+          "ok": false,
+          "note": ""
+        },
+        "jq": {
+          "present": false,
+          "path": "",
+          "ok": false,
+          "note": ""
+        },
+        "rg": {
+          "present": false,
+          "path": "",
+          "ok": false,
+          "note": ""
+        },
+        "git": {
+          "present": false,
+          "path": "",
+          "ok": false,
+          "note": ""
+        },
+        "python": {
+          "present": false,
+          "path": "",
+          "ok": false,
+          "note": ""
+        }
       },
       "web": {
         "fetch": {
@@ -29,7 +59,9 @@
       "env": {}
     },
     "ours": {
-      "plugins": ["init"]
+      "plugins": [
+        "init"
+      ]
     }
   },
   "memory_tree": {
