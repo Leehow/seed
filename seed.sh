@@ -1609,7 +1609,7 @@ Only the stable original launch PATH is accepted as proof that the command remai
 
 Before finishing, use the shell tool to write the receipt as one JSON object with exactly these required string fields (extra fields are allowed):
   {"command":"seed","entry":"/absolute/path/to/the/executable-entry"}
-The entry must be the actual executable path selected for the seed command. Do not claim success unless the files and receipt exist. The outer runtime will independently validate everything after this turn.
+The entry must be exactly the string that command -v seed prints under the stable original launch PATH: the PATH entry itself. If you installed a symbolic link, that is the link's own path, not the path it points at. Do not claim success unless the files and receipt exist. The outer runtime will independently validate everything after this turn.
 EOF
 }
 
