@@ -1,6 +1,6 @@
 {
-  "version": "42",
-  "updated": "2026-08-22T17:45:58Z",
+  "version": "43",
+  "updated": "2026-08-22T18:30:41Z",
   "required": {
     "init": "init.json"
   },
