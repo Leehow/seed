@@ -1863,7 +1863,16 @@ seed_load_or_activate() {
         . "$INSTALL/.env"
         set +a
       fi
-      [ -n "${LLM_API_KEY:-}" ] || die 'first run: sh seed.sh deepseek <API_KEY>' 64
+      # Name a command that exists where the human is standing. Piped from
+      # curl, $0 is the shell binary and no seed.sh was ever written; the
+      # only thing to run is the wrapper we just made, and sending them
+      # after a file that is not there ends the install right here.
+      if [ -n "${SEED_SELF:-}" ] && [ -x "$SEED_SELF" ] && ! seed_runtime_ok "$SELF"; then
+        first_cmd="$SEED_SELF deepseek <API_KEY>"
+      else
+        first_cmd='sh seed.sh deepseek <API_KEY>'
+      fi
+      [ -n "${LLM_API_KEY:-}" ] || die "first run: $first_cmd" 64
       LLM_PROVIDER=${LLM_PROVIDER:-deepseek}
       LLM_API_URL=${LLM_API_URL:-https://api.deepseek.com/chat/completions}
       LLM_MODEL=${LLM_MODEL:-deepseek-v4-flash}
