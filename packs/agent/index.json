@@ -1,12 +1,11 @@
 {
-  "version": "51",
-  "updated": "2026-08-23T09:10:00Z",
+  "version": "52",
+  "updated": "2026-08-23T10:30:00Z",
   "required": {
     "init": "init.json"
   },
   "optional": {
     "seed_agent": "seed-agent.json"
   },
-  "context_window": 128000,
-  "hooks": {}
+  "context_window": 128000
 }

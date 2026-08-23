@@ -8,14 +8,10 @@ SELF=$(CDPATH= cd "$(dirname "$0")" && pwd -P)/$(basename "$0")
 SEED_VERSION=1
 SEED_LAUNCH_PATH=${PATH:-}
 AGENT_MAX_ROUNDS=${AGENT_MAX_ROUNDS:-80}
-# Empty no-tool turns are provider glitches, never successful completion.
-# This is retries after the initial bad turn; set to 0 only for diagnostics.
 SEED_EMPTY_RETRIES=${SEED_EMPTY_RETRIES:-3}
 ACTION_TIMEOUT=${SEED_ACTION_TIMEOUT:-180}
 MAX_OBS_BYTES=${SEED_MAX_OBS_BYTES:-16384}
 HTTP_TIMEOUT=${SEED_HTTP_TIMEOUT:-300}
-# Streams die on stall, not on total time: reasoning models can think
-# past any fixed --max-time while still sending deltas.
 HTTP_STALL=${SEED_HTTP_STALL:-300}
 LAUNCH_CWD=$(pwd -P)
 
@@ -120,8 +116,6 @@ ensure_jq() {
   command -v jq >/dev/null 2>&1 || die "need jq" 69
 }
 
-# DeepSeek-only request field. Other channels keep their catalog extra
-# untouched; unknown fields can 400 on OpenAI-compatible endpoints.
 disable_thinking() {
   [ "${LLM_PROVIDER:-}" = deepseek ] || return 0
   extra=${LLM_EXTRA:-'{}'}
@@ -174,8 +168,6 @@ pack_join() {
   esac
 }
 
-# One GET for every pack fetch. Body lands in dest; HTTP_CODE and
-# HTTP_CURL carry the outcome. Returns 0 only on curl ok + HTTP 2xx.
 http_get() {
   hg_url=$1
   hg_dest=$2
@@ -370,13 +362,18 @@ Keep large outputs out of this conversation: redirect them to files and query wi
 When you create new project artifacts on your own initiative, put them under project/<task-slug>/ in the workspace, not loose in the workspace root. If the human names a path, or the workspace already has its own layout, follow that instead.
 Never read .env or any credentials file. Never put API keys into commands, files, or messages; delegated children load credentials from .env themselves.
 The task is the human's last message. Do not replace it with Machine index key names.
+Reply in the same language the human just used.
+Do not stream your process to the human. When the task is done, reply with a short final answer and no tool_calls.
+EOF
+}
+
+cabin_agent_system() {
+  cat <<'EOF'
 Before acting, read the Machine index with shell (jq, not cat of the whole file) and follow system.retrieve.
 The index is a helper catalog, not the problem. jq it for ok matches; do not rewrite the human's ask into index key names.
 When the human asks about skills or SKILL.md, open https://agentskills.io/specification with shell first.
 When the human's message starts with /, it is a slash command, not a coding task: follow system.retrieve and build the commands pack first if the table is missing.
 When the human asks what tools you have, what you can use, or what was indexed: first jq the Machine index. Then list (1) the two API tools shell and edit, (2) every ok entry that system.retrieve tells you to use. Mention present-but-not-ok items separately. Do not answer with only shell and edit. Do not dump the raw index.
-Reply in the same language the human just used.
-Do not stream your process to the human. When the task is done, reply with a short final answer and no tool_calls.
 EOF
 }
 
@@ -1096,8 +1093,6 @@ skill_catalog() {
   ' "$scf" 2>/dev/null || true
 }
 
-# Two lines of ready state from the Machine index so plain tasks do not
-# burn a round on jq-reading it: which tools are ok.
 agent_state_lines() {
   sf=$INSTALL/agent-store/index.json
   [ -f "$sf" ] || return 0
@@ -1116,20 +1111,19 @@ agent_state_lines() {
 }
 
 product_system() {
-  printf '%s\nModel: %s (%s)\nMachine index: %s\nProject memory: %s\n' \
-    "$(cabin_product_system)" \
-    "${LLM_MODEL:-unknown}" \
-    "${LLM_PROVIDER:-unknown}" \
-    "$INSTALL/agent-store/index.json" \
-    "$PWD/.agent-memory/index.json"
+  cabin_product_system
+  printf 'Model: %s (%s)\n' "${LLM_MODEL:-unknown}" "${LLM_PROVIDER:-unknown}"
   if [ "${SEED_RUN_MODE:-agent}" = simple ]; then
-    printf 'Mode: simple. No Agent Pack. /packs is not available.\n'
+    printf 'Mode: simple. No Agent Pack, Machine index, or /packs.\n'
     return 0
   fi
-  printf 'SEED_SELF=%s\n' "${SEED_SELF:-$SELF}"
+  cabin_agent_system
+  printf 'Machine index: %s\nProject memory: %s\nSEED_SELF=%s\n' \
+    "$INSTALL/agent-store/index.json" \
+    "$PWD/.agent-memory/index.json" \
+    "${SEED_SELF:-}"
   agent_state_lines
   skill_catalog
-  agent_run_hooks system
 }
 
 agent_pack_get() {
@@ -1142,55 +1136,6 @@ agent_pack_get() {
   rm -f "$ap_body"
   [ "$HTTP_CURL" -eq 0 ] || die "agent pack: network failed (curl=$HTTP_CURL)" 71
   die "agent pack: HTTP $HTTP_CODE" 72
-}
-
-# Best-effort GET into dest. 404 / network fail: leave dest, return 1.
-agent_pack_try() {
-  at_body=$(mktemp "${TMPDIR:-/tmp}/seed-aptry.XXXXXX")
-  if http_get "$1" "$at_body"; then
-    mv "$at_body" "$2"
-    return 0
-  fi
-  rm -f "$at_body"
-  return 1
-}
-
-agent_fetch_hooks() {
-  store=$INSTALL/agent-store
-  catf=$store/catalog.json
-  [ -f "$catf" ] || return 0
-  mkdir -p "$store/packs"
-  root=$(pack_root)
-  jq -r '.hooks | .. | strings' "$catf" 2>/dev/null | sort -u | while IFS= read -r rel; do
-    [ -n "$rel" ] || continue
-    case $rel in
-      *.sh) ;;
-      *) continue ;;
-    esac
-    case $rel in
-      *..*|/*) continue ;;
-    esac
-    dest=$store/packs/$(basename "$rel")
-    agent_pack_try "$(pack_join "$root/agent" "$rel")" "$dest" || true
-  done
-}
-
-agent_run_hooks() {
-  phase=$1
-  store=$INSTALL/agent-store
-  catf=$store/catalog.json
-  [ -f "$catf" ] || return 0
-  SLAB_MACHINE_INDEX=$store/index.json
-  export SLAB_MACHINE_INDEX
-  jq -r --arg p "$phase" '.hooks[$p][]? // empty' "$catf" 2>/dev/null | while IFS= read -r rel; do
-    [ -n "$rel" ] || continue
-    script=$store/packs/$(basename "$rel")
-    [ -f "$script" ] || continue
-    case $phase in
-      system) /bin/sh "$script" blurb || true ;;
-      *) /bin/sh "$script" || true ;;
-    esac
-  done
 }
 
 agent_ready() {
@@ -1269,8 +1214,6 @@ agent_discard_baseline() {
   rm -f "$(agent_baseline_file)"
 }
 
-# Template + live probe + ready=true. Independent of the official index,
-# so a half-written tree cannot poison the fallback.
 agent_write_baseline() {
   store=$INSTALL/agent-store
   pack=$store/packs/init.json
@@ -1310,8 +1253,6 @@ agent_restore_baseline() {
   agent_check_machine_tree "$dest"
 }
 
-# Shared fetch: take a catalog body, pull required.init, write both under
-# agent-store. strict=1 demands the full init pack shape (first fetch).
 agent_fetch_pack() {
   fp_strict=$1
   fp_index=$2
@@ -1335,14 +1276,12 @@ agent_fetch_pack() {
   printf '%s\n' "$body" > "$tmpi"
   mv "$tmpi" "$store/packs/init.json"
   mv "$tmpc" "$store/catalog.json"
-  agent_fetch_hooks
 }
 
 agent_fetch_required() {
   store=$INSTALL/agent-store
   mkdir -p "$store/packs"
   if [ -f "$store/catalog.json" ] && [ -f "$store/packs/init.json" ]; then
-    agent_fetch_hooks
     return 0
   fi
   root=$(pack_root)
@@ -1381,9 +1320,6 @@ agent_place_trees() {
   fi
 }
 
-# Deterministic probe: the engine, not the model, fills system.tools
-# (command -v for the path, a cheap smoke for ok). The init conversation
-# only handles the fuzzy rest: web smoke, skills scan, ready flip.
 agent_probe_one() {
   pt=$1
   pb=$(command -v "$pt" 2>/dev/null || true)
@@ -1453,12 +1389,10 @@ agent_ensure_init() {
     agent_try_update
     agent_probe_tools
     agent_discard_baseline
-    agent_run_hooks after_ready
     return 0
   fi
   if agent_restore_baseline; then
     agent_probe_tools
-    agent_run_hooks after_ready
     return 0
   fi
   printf 'initializing:\n' >&2
@@ -1472,7 +1406,6 @@ agent_ensure_init() {
   agent_run_init
   agent_repair_machine_tree || true
   agent_probe_tools
-  agent_run_hooks after_ready
   if agent_check_machine_tree; then
     agent_discard_baseline
     printf 'ready\n' >&2
@@ -1540,6 +1473,8 @@ seed_state_root() {
   fi
 }
 
+seed_mv() { mv "$1" "$2.new" && mv "$2.new" "$2"; }
+
 seed_pack_apply() {
   src=$1
   need jq
@@ -1549,53 +1484,131 @@ seed_pack_apply() {
   slug=$(jq -r '.slug // empty' "$src")
   if [ -z "$slug" ] && jq -e 'has("prompt")' "$src" >/dev/null 2>&1; then slug=pack; fi
   case $slug in
-    ''|*[!a-zA-Z0-9_-]*|-*|_*)
-      printf 'error: pack has no usable slug\n' >&2; return 69 ;;
+    [a-zA-Z0-9]|[a-zA-Z0-9][a-zA-Z0-9._-]*) ;;
+    *) printf 'error: pack has no usable slug\n' >&2; return 69 ;;
   esac
   store=$INSTALL/agent-store
   mkdir -p "$store/packs" "$store/loaded"
-  if jq -e '.files | type == "object"' "$src" >/dev/null 2>&1; then
-    n=$(jq '.files | keys | length' "$src")
+  stg=$(mktemp -d "${TMPDIR:-/tmp}/seed-stg.XXXXXX") || return 70
+  mkdir -p "$stg/p"
+  e=
+  if jq -e 'has("files")' "$src" >/dev/null 2>&1; then
+    if ! jq -e '.files | type == "object"' "$src" >/dev/null 2>&1; then
+      e='pack files must be an object'
+      n=0
+    else
+      n=$(jq '.files | keys | length' "$src")
+    fi
     i=0
-    while [ "$i" -lt "$n" ]; do
+    while [ -z "$e" ] && [ "$i" -lt "$n" ]; do
       name=$(jq -r --argjson i "$i" '.files | keys[$i]' "$src")
       i=$((i + 1))
-      case $name in ''|*..*|/*|*/*) continue ;; esac
-      jq --arg n "$name" '.files[$n]' "$src" > "$store/packs/$name"
+      case $name in ''|.*|*/*|*..*) e="illegal pack path: $name" ;; esac
+      [ -n "$e" ] || jq --arg n "$name" '.files[$n]' "$src" > "$stg/p/$name"
     done
-    if jq -e '.files["init.json"] | type == "object" and has("machine_tree")' \
+    if [ -z "$e" ] && jq -e '.files["init.json"] | type == "object" and has("machine_tree")' \
         "$src" >/dev/null 2>&1; then
       if jq -e '.index | type == "object"' "$src" >/dev/null 2>&1; then
-        jq '.index' "$src" > "$store/catalog.json"
+        jq '.index' "$src" > "$stg/catalog.json"
       elif jq -e '.files["index.json"] | type == "object"' "$src" >/dev/null 2>&1; then
-        jq '.files["index.json"]' "$src" > "$store/catalog.json"
+        jq '.files["index.json"]' "$src" > "$stg/catalog.json"
       fi
     fi
   else
-    jq '.' "$src" > "$store/packs/$slug.json"
+    jq '.' "$src" > "$stg/p/$slug.json"
   fi
-  tmp=$store/loaded/$slug.json.tmp
-  cp "$src" "$tmp" && mv "$tmp" "$store/loaded/$slug.json"
-  [ -s "$store/loaded/$slug.json" ] || {
+  rec=$store/loaded/$slug.json
+  if [ -z "$e" ]; then
+    set -- "$stg/p"/*
+    [ -f "$1" ] || e='pack has no files'
+  fi
+  if [ -z "$e" ]; then
+    if [ -L "$store" ] || [ -L "$store/packs" ] || [ -L "$store/loaded" ] \
+      || [ -L "$store/catalog.json" ] || [ -L "$rec" ]; then
+      e='pack dest is a symlink'
+    fi
+    for f in "$stg/p"/*; do
+      [ -f "$f" ] || continue
+      [ -L "$store/packs/$(basename "$f")" ] && e='pack dest is a symlink'
+    done
+  fi
+  if [ -n "$e" ]; then
+    rm -rf "$stg"
+    printf 'error: %s\n' "$e" >&2
+    return 69
+  fi
+  cp "$src" "$stg/r.json"
+  for f in "$stg/p"/*; do
+    [ -f "$f" ] || continue
+    seed_mv "$f" "$store/packs/$(basename "$f")" || e=1
+  done
+  if [ -f "$stg/catalog.json" ]; then
+    seed_mv "$stg/catalog.json" "$store/catalog.json" || e=1
+  fi
+  seed_mv "$stg/r.json" "$rec" || e=1
+  rm -rf "$stg"
+  if [ -n "$e" ] || [ ! -s "$rec" ]; then
     printf 'error: pack persist failed\n' >&2; return 70
-  }
+  fi
   printf 'loaded: %s\n' "$slug"
+}
+
+seed_runtime_ok() {
+  [ -f "$1" ] && [ -r "$1" ] || return 1
+  grep -q 'seed.sh is the standalone runtime' "$1" 2>/dev/null
+}
+
+seed_materialize() {
+  dest=$INSTALL/seed.sh
+  seed_runtime_ok "$dest" && return 0
+  src=${SEED_RUNTIME_URL:-https://seed-agents.com/dl/seed.sh}
+  tmp=$dest.tmp
+  case $src in
+    /*) [ -f "$src" ] && cp "$src" "$tmp" || die 'cannot materialize seed runtime: source missing' 69 ;;
+    http://*|https://*)
+      need curl
+      http_get "$src" "$tmp" || { rm -f "$tmp"; die 'cannot materialize seed runtime: network failed' 71; } ;;
+    *) die 'cannot materialize seed runtime: invalid source' 64 ;;
+  esac
+  if seed_runtime_ok "$tmp" && /bin/sh -n "$tmp"; then mv "$tmp" "$dest"; return 0; fi
+  rm -f "$tmp"
+  die 'cannot materialize seed runtime: invalid file' 69
+}
+
+seed_bind_self() {
+  rt=
+  if seed_runtime_ok "${SEED_SELF:-}"; then
+    rt=$SEED_SELF
+  elif seed_runtime_ok "$SELF"; then
+    rt=$SELF
+  else
+    seed_materialize
+    rt=$INSTALL/seed.sh
+  fi
+  SEED_SELF=$INSTALL/seed
+  printf '#!/bin/sh\nexec /bin/sh "%s" "$@"\n' "$rt" > "$SEED_SELF"
+  chmod +x "$SEED_SELF"
+  seed_runtime_ok "$rt" && [ -x "$SEED_SELF" ] || die 'SEED_SELF is not a usable seed runtime' 69
 }
 
 seed_prepare_state() {
   state=$(seed_state_root)
   mkdir -p "$state"
   INSTALL=$(CDPATH= cd "$state" && pwd -P)
-  SEED_SELF=${SEED_SELF:-$SELF}
-  if [ ! -x "$SEED_SELF" ]; then
-    SEED_SELF=$INSTALL/seed
-    printf '#!/bin/sh\nexec /bin/sh "%s" "$@"\n' "$SELF" > "$SEED_SELF"
-    chmod +x "$SEED_SELF"
-  fi
-  export SEED_HOME=$INSTALL SEED_SELF
+  export SEED_HOME=$INSTALL
+  seed_bind_self
+  export SEED_SELF
 }
 
 seed_ask_mode() {
+  src=
+  if [ -t 0 ] || [ "${1:-}" = setup ]; then
+    src=stdin
+  elif (exec </dev/tty) 2>/dev/null; then
+    src=tty
+  else
+    printf 'agent\n'; return 0
+  fi
   printf '%s\n' \
     'Choose your experience:' \
     '1) Agent (recommended) - official Agent Pack, then /packs /help' \
@@ -1603,11 +1616,9 @@ seed_ask_mode() {
   while :; do
     printf 'Choice [1]: ' >&2
     ans=
-    if [ -t 0 ] || [ "${1:-}" = setup ]; then
+    if [ "$src" = stdin ]; then
       IFS= read -r ans || ans=
-    elif [ -r /dev/tty ]; then
-      IFS= read -r ans </dev/tty || ans=
-    else
+    elif ! IFS= read -r ans </dev/tty 2>/dev/null; then
       printf 'agent\n'; return 0
     fi
     case $ans in
@@ -1622,7 +1633,11 @@ seed_resolve_mode() {
   ask=${1:-}
   mf=$INSTALL/agent-store/mode
   m=${SEED_MODE:-}
-  case $m in agent|simple)
+  if [ -n "$m" ]; then
+    case $m in
+      agent|simple) ;;
+      *) die 'SEED_MODE must be agent or simple' 64 ;;
+    esac
     SEED_RUN_MODE=$m
     if [ "$ask" = setup ] || [ ! -f "$mf" ]; then
       mkdir -p "$INSTALL/agent-store"
@@ -1631,7 +1646,7 @@ seed_resolve_mode() {
     export SEED_RUN_MODE
     [ "$ask" = setup ] && printf 'mode: %s\n' "$m"
     return 0
-  esac
+  fi
   if [ "$ask" != setup ] && [ -f "$mf" ]; then
     IFS= read -r m < "$mf" || m=
     case $m in agent|simple)
