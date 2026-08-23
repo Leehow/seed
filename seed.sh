@@ -1789,6 +1789,19 @@ seed_packs_install() {
     rm -f "$body"
     return 71
   fi
+  # A pack published as a bare prompt carries no slug, and apply would file
+  # it under the generic name every slug-less pack gets, so the second one
+  # installed overwrites the first and the receipt names neither. We asked
+  # for this slug by name; stamp it on before applying.
+  if ! jq -e 'has("slug")' "$body" >/dev/null 2>&1; then
+    stamped=$body.slug
+    if jq --arg s "$slug" '. + {slug: $s}' "$body" > "$stamped" 2>/dev/null &&
+       [ -s "$stamped" ]; then
+      mv "$stamped" "$body"
+    else
+      rm -f "$stamped"
+    fi
+  fi
   st=0
   seed_pack_apply "$body" || st=$?
   rm -f "$body"
