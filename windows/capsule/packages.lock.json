@@ -1,0 +1,1128 @@
+{
+  "schema_version": 1,
+  "capsule": {
+    "id": "seed-posix-msys2-x86_64-20260822",
+    "name": "seed-posix-msys2",
+    "arch": "x86_64",
+    "host_os": "windows",
+    "runtime_shell": "sh",
+    "runtime_environment": "msys2",
+    "layout": "layout.json",
+    "commands": "commands.json"
+  },
+  "snapshot": {
+    "repo": "msys",
+    "arch": "x86_64",
+    "db_url": "https://repo.msys2.org/msys/x86_64/msys.db",
+    "db_last_modified": "Sat, 22 Aug 2026 07:27:10 GMT",
+    "db_etag": "6a894f4e-76393",
+    "db_sha256": "6955ef920ddcce83ce2baf2e055db9198f8ad7c8b508cfd598463ec57d35d585",
+    "db_size": 484243,
+    "captured_at": "2026-08-23T03:25:00Z"
+  },
+  "mirrors": [
+    {
+      "id": "official",
+      "primary": true,
+      "url": "https://repo.msys2.org/msys/x86_64/"
+    },
+    {
+      "id": "msys2-mirror",
+      "primary": false,
+      "url": "https://mirror.msys2.org/msys/x86_64/"
+    },
+    {
+      "id": "tuna",
+      "primary": false,
+      "url": "https://mirrors.tuna.tsinghua.edu.cn/msys2/msys/x86_64/"
+    },
+    {
+      "id": "nju",
+      "primary": false,
+      "url": "https://mirror.nju.edu.cn/msys2/msys/x86_64/"
+    }
+  ],
+  "roots": [
+    "msys2-runtime",
+    "filesystem",
+    "bash",
+    "coreutils",
+    "grep",
+    "gawk",
+    "sed",
+    "curl",
+    "jq",
+    "ca-certificates"
+  ],
+  "file_only_packages": [
+    "ca-certificates"
+  ],
+  "excluded_script_depends": [
+    "findutils",
+    "p11-kit",
+    "libp11-kit",
+    "libffi",
+    "libtasn1",
+    "info",
+    "gzip",
+    "less",
+    "libxcrypt",
+    "libpcre2_8"
+  ],
+  "excluded_script_depends_reason": "ca-certificates install hooks (update-ca-trust / p11-kit / find / info) are not executed. The package already ships usr/ssl/certs/ca-bundle.crt and usr/ssl/cert.pem. procps-ng is omitted because it does not ship ps.exe/kill.exe on MSYS2; those come from msys2-runtime.",
+  "extract_order": [
+    "filesystem",
+    "msys2-runtime",
+    "gcc-libs",
+    "zlib",
+    "libiconv",
+    "libintl",
+    "gmp",
+    "mpfr",
+    "ncurses",
+    "libreadline",
+    "libpcre",
+    "brotli",
+    "libzstd",
+    "libopenssl",
+    "openssl",
+    "libunistring",
+    "libidn2",
+    "libpsl",
+    "libnghttp2",
+    "libnghttp3",
+    "libngtcp2",
+    "libssh2",
+    "libcurl",
+    "oniguruma",
+    "ca-certificates",
+    "bash",
+    "coreutils",
+    "grep",
+    "gawk",
+    "sed",
+    "curl",
+    "jq"
+  ],
+  "prune": [
+    "usr/share/man",
+    "usr/share/info",
+    "usr/share/doc",
+    "usr/share/locale",
+    "usr/share/aclocal",
+    "usr/include",
+    "usr/lib/pkgconfig",
+    "etc/post-install",
+    "clang64",
+    "clangarm64",
+    "mingw32",
+    "mingw64",
+    "ucrt64"
+  ],
+  "prune_globs": [
+    "*.a",
+    "*.dll.a",
+    "usr/bin/bashbug"
+  ],
+  "packages": {
+    "filesystem": {
+      "name": "filesystem",
+      "base": "filesystem",
+      "version": "2026.03.06-1",
+      "filename": "filesystem-2026.03.06-1-x86_64.pkg.tar.zst",
+      "sha256": "4506b2dbb496281b7645ee2b2d3700f6a2fab3d74a800733f3b3b44eeb8edc5c",
+      "csize": 94696,
+      "isize": 248435,
+      "arch": "x86_64",
+      "desc": "Base filesystem",
+      "homepage": "https://github.com/msys2/MSYS2-packages/tree/master/filesystem",
+      "license": [
+        "BSD-3-Clause"
+      ],
+      "license_raw": [
+        "spdx:BSD-3-Clause"
+      ],
+      "depends": [],
+      "provides": [
+        "msys2-base"
+      ],
+      "builddate": 1772810751,
+      "packager": "CI (msys2/msys2-autobuild/ad23bc5d/22769482847)",
+      "msys2_source": "https://github.com/msys2/MSYS2-packages/tree/master/filesystem"
+    },
+    "msys2-runtime": {
+      "name": "msys2-runtime",
+      "base": "msys2-runtime",
+      "version": "3.6.10-3",
+      "filename": "msys2-runtime-3.6.10-3-x86_64.pkg.tar.zst",
+      "sha256": "4dfcff2f7bde98f30dbd5d3773320e2ce2b06d9175a53fee6a18621637e3f3d1",
+      "csize": 2064942,
+      "isize": 6632590,
+      "arch": "x86_64",
+      "desc": "Posix emulation engine for Windows",
+      "homepage": "https://www.cygwin.com/",
+      "license": [
+        "GPL-3.0-or-later"
+      ],
+      "license_raw": [
+        "spdx:GPL-3.0-or-later"
+      ],
+      "depends": [],
+      "provides": [],
+      "builddate": 1786619742,
+      "packager": "CI (https://github.com/msys2/msys2-autobuild/actions/runs/31694345370/job/94428569396)",
+      "msys2_source": "https://github.com/msys2/MSYS2-packages/tree/master/msys2-runtime"
+    },
+    "gcc-libs": {
+      "name": "gcc-libs",
+      "base": "gcc",
+      "version": "15.3.0-1",
+      "filename": "gcc-libs-15.3.0-1-x86_64.pkg.tar.zst",
+      "sha256": "0d99a122c453c05ae21ba3dcea910f2e0d93d38ae067c677a112a315b0f3cec5",
+      "csize": 1082211,
+      "isize": 3251304,
+      "arch": "x86_64",
+      "desc": "Runtime libraries shipped by GCC",
+      "homepage": "https://gcc.gnu.org/",
+      "license": [
+        "GPL-3.0-or-later AND GPL-2.0-or-later AND LGPL-2.1-or-later AND LGPL-3.0-or-later AND GCC-exception-3.1 AND GFDL-1.3-or-later"
+      ],
+      "license_raw": [
+        "spdx:GPL-3.0-or-later AND GPL-2.0-or-later AND LGPL-2.1-or-later AND LGPL-3.0-or-later AND GCC-exception-3.1 AND GFDL-1.3-or-later"
+      ],
+      "depends": [],
+      "provides": [],
+      "builddate": 1781264161,
+      "packager": "CI (https://github.com/msys2/msys2-autobuild/actions/runs/27413105939/job/81018987541)",
+      "msys2_source": "https://github.com/msys2/MSYS2-packages/tree/master/gcc"
+    },
+    "zlib": {
+      "name": "zlib",
+      "base": "zlib",
+      "version": "1.3.2-1",
+      "filename": "zlib-1.3.2-1-x86_64.pkg.tar.zst",
+      "sha256": "a04aa79996c57f0db936be66cf94326d7e67e9cd8dbffe4cf6e97693d0a1d9ef",
+      "csize": 52245,
+      "isize": 94729,
+      "arch": "x86_64",
+      "desc": "Compression library implementing the deflate compression method found in gzip and PKZIP",
+      "homepage": "https://www.zlib.net/",
+      "license": [
+        "LicenseRef-zlib"
+      ],
+      "license_raw": [
+        "custom"
+      ],
+      "depends": [
+        "gcc-libs"
+      ],
+      "provides": [],
+      "builddate": 1771352746,
+      "packager": "CI (msys2/msys2-autobuild/ad23bc5d/22110501097)",
+      "msys2_source": "https://github.com/msys2/MSYS2-packages/tree/master/zlib"
+    },
+    "libiconv": {
+      "name": "libiconv",
+      "base": "libiconv",
+      "version": "1.19-1",
+      "filename": "libiconv-1.19-1-x86_64.pkg.tar.zst",
+      "sha256": "0fa55ea2a6ccf97cf8c58b24b2615815e15e16e6e4e888091c263c2c83c5313d",
+      "csize": 718353,
+      "isize": 1412015,
+      "arch": "x86_64",
+      "desc": "Libiconv is a conversion library",
+      "homepage": "https://www.gnu.org/software/libiconv/",
+      "license": [
+        "LGPL-2.0-or-later"
+      ],
+      "license_raw": [
+        "LGPL"
+      ],
+      "depends": [
+        "gcc-libs"
+      ],
+      "provides": [],
+      "builddate": 1773479083,
+      "packager": "CI (msys2/msys2-autobuild/5e407709/23084817110)",
+      "msys2_source": "https://github.com/msys2/MSYS2-packages/tree/master/libiconv"
+    },
+    "libintl": {
+      "name": "libintl",
+      "base": "gettext",
+      "version": "0.22.5-1",
+      "filename": "libintl-0.22.5-1-x86_64.pkg.tar.zst",
+      "sha256": "336d66b9d95cf9c1804958f8e260762a3e83bf158ed5981f783bc772a31073cf",
+      "csize": 50537,
+      "isize": 111181,
+      "arch": "x86_64",
+      "desc": "GNU Internationalization runtime library",
+      "homepage": "https://www.gnu.org/software/gettext/",
+      "license": [
+        "GPL-1.0-or-later"
+      ],
+      "license_raw": [
+        "GPL"
+      ],
+      "depends": [
+        "gcc-libs",
+        "libiconv"
+      ],
+      "provides": [],
+      "builddate": 1739195711,
+      "packager": "CI (msys2/msys2-autobuild/b4421681/13242412014)",
+      "msys2_source": "https://github.com/msys2/MSYS2-packages/tree/master/gettext"
+    },
+    "gmp": {
+      "name": "gmp",
+      "base": "gmp",
+      "version": "6.3.0-2",
+      "filename": "gmp-6.3.0-2-x86_64.pkg.tar.zst",
+      "sha256": "f84536138e618d47a1df2da83916cfebbd449f159ffad52f994a71060a41cf34",
+      "csize": 396914,
+      "isize": 766237,
+      "arch": "x86_64",
+      "desc": "A free library for arbitrary precision arithmetic",
+      "homepage": "https://gmplib.org/",
+      "license": [
+        "LGPL-3.0-only"
+      ],
+      "license_raw": [
+        "LGPL3"
+      ],
+      "depends": [],
+      "provides": [],
+      "builddate": 1752181673,
+      "packager": "CI (msys2/msys2-autobuild/70dec0bd/16206006998)",
+      "msys2_source": "https://github.com/msys2/MSYS2-packages/tree/master/gmp"
+    },
+    "mpfr": {
+      "name": "mpfr",
+      "base": "mpfr",
+      "version": "4.2.2-1",
+      "filename": "mpfr-4.2.2-1-x86_64.pkg.tar.zst",
+      "sha256": "8f1b6c17c53e00494a488e03dfdf8fc742027ed03a5bd7b1b3a6a33f595a7498",
+      "csize": 395839,
+      "isize": 872502,
+      "arch": "x86_64",
+      "desc": "Multiple-precision floating-point library",
+      "homepage": "https://www.mpfr.org/",
+      "license": [
+        "LGPL-3.0-or-later"
+      ],
+      "license_raw": [
+        "spdx:LGPL-3.0-or-later"
+      ],
+      "depends": [
+        "gmp>=5.0"
+      ],
+      "provides": [],
+      "builddate": 1742799750,
+      "packager": "CI (msys2/msys2-autobuild/e9e823c2/14029154638)",
+      "msys2_source": "https://github.com/msys2/MSYS2-packages/tree/master/mpfr"
+    },
+    "ncurses": {
+      "name": "ncurses",
+      "base": "ncurses",
+      "version": "6.6-2",
+      "filename": "ncurses-6.6-2-x86_64.pkg.tar.zst",
+      "sha256": "828c92f09b17f00d3b49362fcfa4affa58e5e50e238f290ea36eb7a690da3acb",
+      "csize": 1286284,
+      "isize": 11273114,
+      "arch": "x86_64",
+      "desc": "System V Release 4.0 curses emulation library",
+      "homepage": "https://www.gnu.org/software/ncurses/",
+      "license": [
+        "MIT"
+      ],
+      "license_raw": [
+        "spdx:MIT"
+      ],
+      "depends": [
+        "gcc-libs"
+      ],
+      "provides": [],
+      "builddate": 1779820402,
+      "packager": "CI (https://github.com/msys2/msys2-autobuild/actions/runs/26467448111/job/77931455367)",
+      "msys2_source": "https://github.com/msys2/MSYS2-packages/tree/master/ncurses"
+    },
+    "libreadline": {
+      "name": "libreadline",
+      "base": "readline",
+      "version": "8.3.003-1",
+      "filename": "libreadline-8.3.003-1-x86_64.pkg.tar.zst",
+      "sha256": "f78e11a496010305fb80b6804518d5c1257794fc87bc8caaf8c4a65d7a983dec",
+      "csize": 388315,
+      "isize": 1409555,
+      "arch": "x86_64",
+      "desc": "GNU readline library",
+      "homepage": "https://tiswww.case.edu/php/chet/readline/rltop.html",
+      "license": [
+        "GPL-1.0-or-later"
+      ],
+      "license_raw": [
+        "GPL"
+      ],
+      "depends": [
+        "ncurses"
+      ],
+      "provides": [],
+      "builddate": 1765417679,
+      "packager": "CI (msys2/msys2-autobuild/8cbb808c/20119145551)",
+      "msys2_source": "https://github.com/msys2/MSYS2-packages/tree/master/readline"
+    },
+    "libpcre": {
+      "name": "libpcre",
+      "base": "pcre",
+      "version": "8.45-5",
+      "filename": "libpcre-8.45-5-x86_64.pkg.tar.zst",
+      "sha256": "b4dc2eb7795cbacaa683101d720fa67f536262497a1d89934a58f5dab8d17d17",
+      "csize": 96135,
+      "isize": 289270,
+      "arch": "x86_64",
+      "desc": "A library that implements Perl 5-style regular expressions",
+      "homepage": "https://www.pcre.org/",
+      "license": [
+        "BSD-3-Clause"
+      ],
+      "license_raw": [
+        "BSD"
+      ],
+      "depends": [
+        "gcc-libs"
+      ],
+      "provides": [],
+      "builddate": 1738171707,
+      "packager": "CI (msys2/msys2-autobuild/bdd38ec7/13036922047)",
+      "msys2_source": "https://github.com/msys2/MSYS2-packages/tree/master/pcre"
+    },
+    "brotli": {
+      "name": "brotli",
+      "base": "brotli",
+      "version": "1.2.0-1",
+      "filename": "brotli-1.2.0-1-x86_64.pkg.tar.zst",
+      "sha256": "6642bd8fcb238119b167038614ad4eaf44a25b4978a34f74349e0359565ac671",
+      "csize": 381349,
+      "isize": 1008332,
+      "arch": "x86_64",
+      "desc": "Brotli compression library",
+      "homepage": "https://github.com/google/brotli",
+      "license": [
+        "MIT"
+      ],
+      "license_raw": [
+        "MIT"
+      ],
+      "depends": [
+        "gcc-libs"
+      ],
+      "provides": [],
+      "builddate": 1762399760,
+      "packager": "CI (msys2/msys2-autobuild/db1199d2/19123813876)",
+      "msys2_source": "https://github.com/msys2/MSYS2-packages/tree/master/brotli"
+    },
+    "libzstd": {
+      "name": "libzstd",
+      "base": "zstd",
+      "version": "1.5.7-1",
+      "filename": "libzstd-1.5.7-1-x86_64.pkg.tar.zst",
+      "sha256": "5e370b2e725a0a7e5ff58d84653c9a0cd5a10b9cfe930f2d949a28ad2a11c1f2",
+      "csize": 399681,
+      "isize": 1136580,
+      "arch": "x86_64",
+      "desc": "Zstandard - Fast real-time compression algorithm",
+      "homepage": "https://facebook.github.io/zstd/",
+      "license": [
+        "BSD-3-Clause"
+      ],
+      "license_raw": [
+        "BSD"
+      ],
+      "depends": [
+        "gcc-libs"
+      ],
+      "provides": [],
+      "builddate": 1740037663,
+      "packager": "CI (msys2/msys2-autobuild/a187346d/13430322475)",
+      "msys2_source": "https://github.com/msys2/MSYS2-packages/tree/master/zstd"
+    },
+    "libopenssl": {
+      "name": "libopenssl",
+      "base": "openssl",
+      "version": "3.6.3-1",
+      "filename": "libopenssl-3.6.3-1-x86_64.pkg.tar.zst",
+      "sha256": "f85f28d46b09d02229bfe923c9cc323463810fc4dbea2e8275a2fdc40edb2c53",
+      "csize": 2091819,
+      "isize": 6615952,
+      "arch": "x86_64",
+      "desc": "The Open Source toolkit for Secure Sockets Layer and Transport Layer Security",
+      "homepage": "https://openssl-library.org",
+      "license": [
+        "Apache-2.0"
+      ],
+      "license_raw": [
+        "spdx:Apache-2.0"
+      ],
+      "depends": [],
+      "provides": [],
+      "builddate": 1781041183,
+      "packager": "CI (https://github.com/msys2/msys2-autobuild/actions/runs/27237482172/job/80433045143)",
+      "msys2_source": "https://github.com/msys2/MSYS2-packages/tree/master/openssl"
+    },
+    "openssl": {
+      "name": "openssl",
+      "base": "openssl",
+      "version": "3.6.3-1",
+      "filename": "openssl-3.6.3-1-x86_64.pkg.tar.zst",
+      "sha256": "26b53a063e95bd9295b796053ac34d0a4ec77dc49fb11fc135454ea676e7e9c5",
+      "csize": 685181,
+      "isize": 1493136,
+      "arch": "x86_64",
+      "desc": "The Open Source toolkit for Secure Sockets Layer and Transport Layer Security",
+      "homepage": "https://openssl-library.org",
+      "license": [
+        "Apache-2.0"
+      ],
+      "license_raw": [
+        "spdx:Apache-2.0"
+      ],
+      "depends": [
+        "libopenssl"
+      ],
+      "provides": [],
+      "builddate": 1781041183,
+      "packager": "CI (https://github.com/msys2/msys2-autobuild/actions/runs/27237482172/job/80433045143)",
+      "msys2_source": "https://github.com/msys2/MSYS2-packages/tree/master/openssl"
+    },
+    "libunistring": {
+      "name": "libunistring",
+      "base": "libunistring",
+      "version": "1.4.2-1",
+      "filename": "libunistring-1.4.2-1-x86_64.pkg.tar.zst",
+      "sha256": "bcd04706d95b5e7127d39834565bceed6b400192f5fb51599745aba28d5da018",
+      "csize": 772641,
+      "isize": 2799825,
+      "arch": "x86_64",
+      "desc": "Library for manipulating Unicode strings and C strings.",
+      "homepage": "https://www.gnu.org/software/libunistring/",
+      "license": [
+        "LGPL-3.0-or-later OR GPL-2.0-or-later"
+      ],
+      "license_raw": [
+        "spdx:LGPL-3.0-or-later OR GPL-2.0-or-later"
+      ],
+      "depends": [
+        "libiconv"
+      ],
+      "provides": [],
+      "builddate": 1776792698,
+      "packager": "CI (msys2/msys2-autobuild/actions/runs/24736253097/job/72363852740)",
+      "msys2_source": "https://github.com/msys2/MSYS2-packages/tree/master/libunistring"
+    },
+    "libidn2": {
+      "name": "libidn2",
+      "base": "libidn2",
+      "version": "2.3.8-1",
+      "filename": "libidn2-2.3.8-1-x86_64.pkg.tar.zst",
+      "sha256": "55e0de96b893e9f67f14a4283d411fc2a45d7b59333bc16e2a9b16e5bfc9282f",
+      "csize": 150443,
+      "isize": 378191,
+      "arch": "x86_64",
+      "desc": "Implementation of the Stringprep, Punycode and IDNA specifications",
+      "homepage": "https://www.gnu.org/software/libidn/#libidn2",
+      "license": [
+        "GPL-3.0-only",
+        "LGPL-2.0-or-later"
+      ],
+      "license_raw": [
+        "GPL3",
+        "LGPL"
+      ],
+      "depends": [
+        "libunistring",
+        "libintl"
+      ],
+      "provides": [],
+      "builddate": 1742153898,
+      "packager": "CI (msys2/msys2-autobuild/e9e823c2/13886723612)",
+      "msys2_source": "https://github.com/msys2/MSYS2-packages/tree/master/libidn2"
+    },
+    "libpsl": {
+      "name": "libpsl",
+      "base": "libpsl",
+      "version": "0.23.2-1",
+      "filename": "libpsl-0.23.2-1-x86_64.pkg.tar.zst",
+      "sha256": "749014f86a1ae5f5a5adccec518e0296a03a838db9874aa9803dffaa8d30abc8",
+      "csize": 72764,
+      "isize": 118819,
+      "arch": "x86_64",
+      "desc": "Public Suffix List library (runtime)",
+      "homepage": "https://github.com/rockdaboot/libpsl",
+      "license": [
+        "MIT"
+      ],
+      "license_raw": [
+        "spdx:MIT"
+      ],
+      "depends": [
+        "libidn2",
+        "libunistring"
+      ],
+      "provides": [],
+      "builddate": 1786434727,
+      "packager": "CI (https://github.com/msys2/msys2-autobuild/actions/runs/31469957260/job/93710885570)",
+      "msys2_source": "https://github.com/msys2/MSYS2-packages/tree/master/libpsl"
+    },
+    "libnghttp2": {
+      "name": "libnghttp2",
+      "base": "nghttp2",
+      "version": "1.70.0-1",
+      "filename": "libnghttp2-1.70.0-1-x86_64.pkg.tar.zst",
+      "sha256": "9b3443ff1b26a3ece9394409efca60f3ac8eee94309e5be1e6b05706f3386110",
+      "csize": 66251,
+      "isize": 169623,
+      "arch": "x86_64",
+      "desc": "Framing layer of HTTP/2 is implemented as a reusable C library (runtime)",
+      "homepage": "https://nghttp2.org/",
+      "license": [
+        "MIT"
+      ],
+      "license_raw": [
+        "spdx:MIT"
+      ],
+      "depends": [
+        "gcc-libs"
+      ],
+      "provides": [],
+      "builddate": 1785595778,
+      "packager": "CI (https://github.com/msys2/msys2-autobuild/actions/runs/30704546840/job/91381280333)",
+      "msys2_source": "https://github.com/msys2/MSYS2-packages/tree/master/nghttp2"
+    },
+    "libnghttp3": {
+      "name": "libnghttp3",
+      "base": "nghttp3",
+      "version": "1.18.0-1",
+      "filename": "libnghttp3-1.18.0-1-x86_64.pkg.tar.zst",
+      "sha256": "45fdd8613fa1da08f6c0504377194497fea540ed1fec438bc557736459040669",
+      "csize": 69613,
+      "isize": 178757,
+      "arch": "x86_64",
+      "desc": "HTTP/3 library written in C - runtime libraries",
+      "homepage": "https://nghttp2.org/nghttp3",
+      "license": [
+        "MIT"
+      ],
+      "license_raw": [
+        "spdx:MIT"
+      ],
+      "depends": [
+        "gcc-libs"
+      ],
+      "provides": [],
+      "builddate": 1785089884,
+      "packager": "CI (https://github.com/msys2/msys2-autobuild/actions/runs/30214308836/job/89825659933)",
+      "msys2_source": "https://github.com/msys2/MSYS2-packages/tree/master/nghttp3"
+    },
+    "libngtcp2": {
+      "name": "libngtcp2",
+      "base": "ngtcp2",
+      "version": "1.25.0-1",
+      "filename": "libngtcp2-1.25.0-1-x86_64.pkg.tar.zst",
+      "sha256": "a4c389078632e64ac2b320473651e80d44c97f9fed7a746a232d95b400b14fe8",
+      "csize": 162594,
+      "isize": 461785,
+      "arch": "x86_64",
+      "desc": "An effort to implement IETF QUIC protocol - runtime libraries",
+      "homepage": "https://nghttp2.org/ngtcp2",
+      "license": [
+        "MIT"
+      ],
+      "license_raw": [
+        "spdx:MIT"
+      ],
+      "depends": [
+        "gcc-libs",
+        "libopenssl"
+      ],
+      "provides": [],
+      "builddate": 1785089765,
+      "packager": "CI (https://github.com/msys2/msys2-autobuild/actions/runs/30214308836/job/89825659933)",
+      "msys2_source": "https://github.com/msys2/MSYS2-packages/tree/master/ngtcp2"
+    },
+    "libssh2": {
+      "name": "libssh2",
+      "base": "libssh2",
+      "version": "1.11.1-1",
+      "filename": "libssh2-1.11.1-1-x86_64.pkg.tar.zst",
+      "sha256": "f79883af85a2bb4778e1352c0b7ea27737a05e4110ef14461f0a842a40ff893d",
+      "csize": 230653,
+      "isize": 372105,
+      "arch": "x86_64",
+      "desc": "Multi-protocol file transfer library (runtime)",
+      "homepage": "https://libssh2.org/",
+      "license": [
+        "BSD-3-Clause"
+      ],
+      "license_raw": [
+        "BSD"
+      ],
+      "depends": [
+        "ca-certificates",
+        "openssl",
+        "zlib"
+      ],
+      "provides": [],
+      "builddate": 1735855373,
+      "packager": "CI (msys2/msys2-autobuild/35ff0b71/12589348461)",
+      "msys2_source": "https://github.com/msys2/MSYS2-packages/tree/master/libssh2"
+    },
+    "libcurl": {
+      "name": "libcurl",
+      "base": "curl",
+      "version": "8.21.0-1",
+      "filename": "libcurl-8.21.0-1-x86_64.pkg.tar.zst",
+      "sha256": "efba0e04ece477f119580171c7c795817eed9322fa9a3b00fea5a94e0ea7b622",
+      "csize": 381323,
+      "isize": 918457,
+      "arch": "x86_64",
+      "desc": "Multi-protocol file transfer library (runtime)",
+      "homepage": "https://curl.se/",
+      "license": [
+        "MIT"
+      ],
+      "license_raw": [
+        "spdx:MIT"
+      ],
+      "depends": [
+        "brotli",
+        "ca-certificates",
+        "libidn2",
+        "libnghttp3",
+        "libngtcp2",
+        "libunistring",
+        "libnghttp2",
+        "libpsl",
+        "libssh2",
+        "openssl",
+        "zlib",
+        "libzstd"
+      ],
+      "provides": [],
+      "builddate": 1782285854,
+      "packager": "CI (https://github.com/msys2/msys2-autobuild/actions/runs/28082234436/job/83139674098)",
+      "msys2_source": "https://github.com/msys2/MSYS2-packages/tree/master/curl"
+    },
+    "oniguruma": {
+      "name": "oniguruma",
+      "base": "oniguruma",
+      "version": "6.9.10-1",
+      "filename": "oniguruma-6.9.10-1-x86_64.pkg.tar.zst",
+      "sha256": "989f2b0a616948fe16d85b322f7ca415f66f85fce05b53f5ff85d65d3eb9fd31",
+      "csize": 218542,
+      "isize": 1632472,
+      "arch": "x86_64",
+      "desc": "A regular expressions library",
+      "homepage": "https://github.com/kkos/oniguruma",
+      "license": [
+        "BSD-3-Clause"
+      ],
+      "license_raw": [
+        "BSD"
+      ],
+      "depends": [],
+      "provides": [],
+      "builddate": 1753732634,
+      "packager": "CI (msys2/msys2-autobuild/ab3c2437/16578855496)",
+      "msys2_source": "https://github.com/msys2/MSYS2-packages/tree/master/oniguruma"
+    },
+    "ca-certificates": {
+      "name": "ca-certificates",
+      "base": "ca-certificates",
+      "version": "20260816-1",
+      "filename": "ca-certificates-20260816-1-any.pkg.tar.zst",
+      "sha256": "b7b2344aa87022919d6c4fd2bd9410e6490835c9a2d43092c1284186bae8c5d0",
+      "csize": 395521,
+      "isize": 1066623,
+      "arch": "any",
+      "desc": "Common CA certificates",
+      "homepage": "https://www.mozilla.org/en-US/about/governance/policies/security-group/certs/",
+      "license": [
+        "MPL-2.0 AND GPL-2.0-or-later"
+      ],
+      "license_raw": [
+        "spdx:MPL-2.0 AND GPL-2.0-or-later"
+      ],
+      "depends": [
+        "bash",
+        "openssl",
+        "findutils",
+        "coreutils",
+        "sed",
+        "p11-kit"
+      ],
+      "provides": [],
+      "builddate": 1787061234,
+      "packager": "CI (https://github.com/msys2/msys2-autobuild/actions/runs/32144908404/job/95736224514)",
+      "msys2_source": "https://github.com/msys2/MSYS2-packages/tree/master/ca-certificates"
+    },
+    "bash": {
+      "name": "bash",
+      "base": "bash",
+      "version": "5.3.015-1",
+      "filename": "bash-5.3.015-1-x86_64.pkg.tar.zst",
+      "sha256": "ecd097c0b85938b3167abd7e839a6113b25c8b581b14954aad02e1f8ce556c8e",
+      "csize": 2582400,
+      "isize": 12836835,
+      "arch": "x86_64",
+      "desc": "The GNU Bourne Again shell",
+      "homepage": "https://www.gnu.org/software/bash/bash.html",
+      "license": [
+        "GPL-3.0-or-later"
+      ],
+      "license_raw": [
+        "spdx:GPL-3.0-or-later"
+      ],
+      "depends": [],
+      "provides": [
+        "sh"
+      ],
+      "builddate": 1781078566,
+      "packager": "CI (https://github.com/msys2/msys2-autobuild/actions/runs/27262077036/job/80510007836)",
+      "msys2_source": "https://github.com/msys2/MSYS2-packages/tree/master/bash"
+    },
+    "coreutils": {
+      "name": "coreutils",
+      "base": "coreutils",
+      "version": "8.32-5",
+      "filename": "coreutils-8.32-5-x86_64.pkg.tar.zst",
+      "sha256": "62dfee1c39fd15f99c39802b35e82643bc14fffc16d6c76d4001caa385ec77e3",
+      "csize": 2755209,
+      "isize": 27032364,
+      "arch": "x86_64",
+      "desc": "The basic file, shell and text manipulation utilities of the GNU operating system",
+      "homepage": "https://www.gnu.org/software/coreutils",
+      "license": [
+        "GPL-3.0-only"
+      ],
+      "license_raw": [
+        "GPL3"
+      ],
+      "depends": [
+        "gmp",
+        "libiconv",
+        "libintl"
+      ],
+      "provides": [],
+      "builddate": 1668532067,
+      "packager": "CI (msys2/msys2-autobuild/59e8e1af/3472503137)",
+      "msys2_source": "https://github.com/msys2/MSYS2-packages/tree/master/coreutils"
+    },
+    "grep": {
+      "name": "grep",
+      "base": "grep",
+      "version": "1~3.0-7",
+      "filename": "grep-1~3.0-7-x86_64.pkg.tar.zst",
+      "sha256": "2909b3bbef8d33d66980339fb7bd2d3d9145bae0f04191e6671df39868aea427",
+      "csize": 249241,
+      "isize": 869921,
+      "arch": "x86_64",
+      "desc": "A string search utility",
+      "homepage": "https://www.gnu.org/software/grep/",
+      "license": [
+        "GPL-3.0-only"
+      ],
+      "license_raw": [
+        "GPL3"
+      ],
+      "depends": [
+        "libiconv",
+        "libintl",
+        "libpcre",
+        "sh"
+      ],
+      "provides": [],
+      "builddate": 1738582613,
+      "packager": "CI (msys2/msys2-autobuild/b4421681/13112571662)",
+      "msys2_source": "https://github.com/msys2/MSYS2-packages/tree/master/grep"
+    },
+    "gawk": {
+      "name": "gawk",
+      "base": "gawk",
+      "version": "5.4.1-1",
+      "filename": "gawk-5.4.1-1-x86_64.pkg.tar.zst",
+      "sha256": "4b1322cb6c83d61fde5100e229e3cabc5b7d01fc0d0d8bc311edc08df91916be",
+      "csize": 1519178,
+      "isize": 5364978,
+      "arch": "x86_64",
+      "desc": "GNU version of awk",
+      "homepage": "https://www.gnu.org/software/gawk/",
+      "license": [
+        "GPL-3.0-or-later"
+      ],
+      "license_raw": [
+        "spdx:GPL-3.0-or-later"
+      ],
+      "depends": [
+        "sh",
+        "mpfr",
+        "libintl",
+        "libreadline"
+      ],
+      "provides": [
+        "awk"
+      ],
+      "builddate": 1783806833,
+      "packager": "CI (https://github.com/msys2/msys2-autobuild/actions/runs/29169543570/job/86588338737)",
+      "msys2_source": "https://github.com/msys2/MSYS2-packages/tree/master/gawk"
+    },
+    "sed": {
+      "name": "sed",
+      "base": "sed",
+      "version": "4.9-1",
+      "filename": "sed-4.9-1-x86_64.pkg.tar.zst",
+      "sha256": "3748af28f69e946ec5a42e6670c9bbf6da7352dc93baaa537f69e99c5483b9fc",
+      "csize": 249918,
+      "isize": 804272,
+      "arch": "x86_64",
+      "desc": "GNU stream editor",
+      "homepage": "https://www.gnu.org/software/sed",
+      "license": [
+        "GPL-3.0-only"
+      ],
+      "license_raw": [
+        "GPL3"
+      ],
+      "depends": [
+        "libintl",
+        "sh"
+      ],
+      "provides": [],
+      "builddate": 1668861891,
+      "packager": "CI (msys2/msys2-autobuild/59e8e1af/3503540280)",
+      "msys2_source": "https://github.com/msys2/MSYS2-packages/tree/master/sed"
+    },
+    "curl": {
+      "name": "curl",
+      "base": "curl",
+      "version": "8.21.0-1",
+      "filename": "curl-8.21.0-1-x86_64.pkg.tar.zst",
+      "sha256": "85df4cba7342fcc2a2c8763e603a28721d8095004adf7bc1eae5f85fc0e3a706",
+      "csize": 927514,
+      "isize": 1039482,
+      "arch": "x86_64",
+      "desc": "Multi-protocol file transfer utility",
+      "homepage": "https://curl.se/",
+      "license": [
+        "MIT"
+      ],
+      "license_raw": [
+        "spdx:MIT"
+      ],
+      "depends": [
+        "ca-certificates",
+        "libcurl",
+        "libnghttp3",
+        "libngtcp2",
+        "libunistring",
+        "libnghttp2",
+        "libpsl",
+        "openssl",
+        "zlib"
+      ],
+      "provides": [
+        "wcurl"
+      ],
+      "builddate": 1782285854,
+      "packager": "CI (https://github.com/msys2/msys2-autobuild/actions/runs/28082234436/job/83139674098)",
+      "msys2_source": "https://github.com/msys2/MSYS2-packages/tree/master/curl"
+    },
+    "jq": {
+      "name": "jq",
+      "base": "jq",
+      "version": "1.8.2-1",
+      "filename": "jq-1.8.2-1-x86_64.pkg.tar.zst",
+      "sha256": "7098e1aaad9e714af62e0db9ffdd835d039a172c5759f879f19e2eb4d4f5b3ba",
+      "csize": 293461,
+      "isize": 1096657,
+      "arch": "x86_64",
+      "desc": "Command-line JSON processor",
+      "homepage": "https://jqlang.github.io/jq/",
+      "license": [
+        "MIT"
+      ],
+      "license_raw": [
+        "spdx:MIT"
+      ],
+      "depends": [
+        "gcc-libs",
+        "oniguruma"
+      ],
+      "provides": [],
+      "builddate": 1782034673,
+      "packager": "CI (https://github.com/msys2/msys2-autobuild/actions/runs/27900270134/job/82559207836)",
+      "msys2_source": "https://github.com/msys2/MSYS2-packages/tree/master/jq"
+    }
+  },
+  "required_binaries": {
+    "sh": {
+      "package": "bash",
+      "path": "usr/bin/sh.exe"
+    },
+    "bash": {
+      "package": "bash",
+      "path": "usr/bin/bash.exe"
+    },
+    "jq": {
+      "package": "jq",
+      "path": "usr/bin/jq.exe"
+    },
+    "curl": {
+      "package": "curl",
+      "path": "usr/bin/curl.exe"
+    },
+    "awk": {
+      "package": "gawk",
+      "path": "usr/bin/awk.exe"
+    },
+    "gawk": {
+      "package": "gawk",
+      "path": "usr/bin/gawk.exe"
+    },
+    "grep": {
+      "package": "grep",
+      "path": "usr/bin/grep.exe"
+    },
+    "sed": {
+      "package": "sed",
+      "path": "usr/bin/sed.exe"
+    },
+    "cat": {
+      "package": "coreutils",
+      "path": "usr/bin/cat.exe"
+    },
+    "rm": {
+      "package": "coreutils",
+      "path": "usr/bin/rm.exe"
+    },
+    "mv": {
+      "package": "coreutils",
+      "path": "usr/bin/mv.exe"
+    },
+    "mkdir": {
+      "package": "coreutils",
+      "path": "usr/bin/mkdir.exe"
+    },
+    "chmod": {
+      "package": "coreutils",
+      "path": "usr/bin/chmod.exe"
+    },
+    "cp": {
+      "package": "coreutils",
+      "path": "usr/bin/cp.exe"
+    },
+    "touch": {
+      "package": "coreutils",
+      "path": "usr/bin/touch.exe"
+    },
+    "mktemp": {
+      "package": "coreutils",
+      "path": "usr/bin/mktemp.exe"
+    },
+    "dirname": {
+      "package": "coreutils",
+      "path": "usr/bin/dirname.exe"
+    },
+    "basename": {
+      "package": "coreutils",
+      "path": "usr/bin/basename.exe"
+    },
+    "pwd": {
+      "package": "coreutils",
+      "path": "usr/bin/pwd.exe"
+    },
+    "uname": {
+      "package": "coreutils",
+      "path": "usr/bin/uname.exe"
+    },
+    "tr": {
+      "package": "coreutils",
+      "path": "usr/bin/tr.exe"
+    },
+    "date": {
+      "package": "coreutils",
+      "path": "usr/bin/date.exe"
+    },
+    "sleep": {
+      "package": "coreutils",
+      "path": "usr/bin/sleep.exe"
+    },
+    "wc": {
+      "package": "coreutils",
+      "path": "usr/bin/wc.exe"
+    },
+    "tail": {
+      "package": "coreutils",
+      "path": "usr/bin/tail.exe"
+    },
+    "head": {
+      "package": "coreutils",
+      "path": "usr/bin/head.exe"
+    },
+    "sort": {
+      "package": "coreutils",
+      "path": "usr/bin/sort.exe"
+    },
+    "tee": {
+      "package": "coreutils",
+      "path": "usr/bin/tee.exe"
+    },
+    "printf": {
+      "package": "coreutils",
+      "path": "usr/bin/printf.exe"
+    },
+    "env": {
+      "package": "coreutils",
+      "path": "usr/bin/env.exe"
+    },
+    "ps": {
+      "package": "msys2-runtime",
+      "path": "usr/bin/ps.exe"
+    },
+    "kill": {
+      "package": "msys2-runtime",
+      "path": "usr/bin/kill.exe"
+    },
+    "cygpath": {
+      "package": "msys2-runtime",
+      "path": "usr/bin/cygpath.exe"
+    }
+  },
+  "required_dlls": [
+    "usr/bin/msys-2.0.dll",
+    "usr/bin/msys-gcc_s-seh-1.dll",
+    "usr/bin/msys-stdc++-6.dll",
+    "usr/bin/msys-iconv-2.dll",
+    "usr/bin/msys-intl-8.dll",
+    "usr/bin/msys-gmp-10.dll",
+    "usr/bin/msys-mpfr-6.dll",
+    "usr/bin/msys-ncursesw6.dll",
+    "usr/bin/msys-readline8.dll",
+    "usr/bin/msys-history8.dll",
+    "usr/bin/msys-pcre-1.dll",
+    "usr/bin/msys-z.dll",
+    "usr/bin/msys-zstd-1.dll",
+    "usr/bin/msys-brotlicommon-1.dll",
+    "usr/bin/msys-brotlidec-1.dll",
+    "usr/bin/msys-crypto-3.dll",
+    "usr/bin/msys-ssl-3.dll",
+    "usr/bin/msys-curl-4.dll",
+    "usr/bin/msys-nghttp2-14.dll",
+    "usr/bin/msys-nghttp3-9.dll",
+    "usr/bin/msys-ngtcp2-16.dll",
+    "usr/bin/msys-ngtcp2_crypto_ossl.dll",
+    "usr/bin/msys-idn2-0.dll",
+    "usr/bin/msys-unistring-5.dll",
+    "usr/bin/msys-psl-5.dll",
+    "usr/bin/msys-ssh2-1.dll",
+    "usr/bin/msys-onig-5.dll"
+  ]
+}

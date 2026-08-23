@@ -1,0 +1,45 @@
+{
+  "schema_version": 1,
+  "comment": "Launcher contract for the assembled POSIX capsule. Do not change seed.sh to match this; the launcher consumes these paths.",
+  "root": ".",
+  "shell": "bin/sh.exe",
+  "shell_posix": "/bin/sh",
+  "bash": "bin/bash.exe",
+  "seed": "seed/seed.sh",
+  "manifest": "manifest.json",
+  "hashes": "SHA256SUMS",
+  "notice": "NOTICE",
+  "path_dirs": ["bin"],
+  "msys_prefix": "usr",
+  "ca_bundle": "usr/ssl/certs/ca-bundle.crt",
+  "ca_bundle_alt": "usr/ssl/cert.pem",
+  "tmp": "tmp",
+  "required_entrypoints": [
+    "bin/sh.exe",
+    "bin/bash.exe",
+    "bin/jq.exe",
+    "bin/curl.exe",
+    "bin/awk.exe",
+    "bin/sed.exe",
+    "bin/grep.exe",
+    "bin/ps.exe",
+    "bin/kill.exe",
+    "bin/cygpath.exe",
+    "bin/msys-2.0.dll",
+    "seed/seed.sh"
+  ],
+  "env": {
+    "MSYSTEM": "MSYS",
+    "MSYS2_PATH_TYPE": "inherit",
+    "CHERE_INVOKING": "1"
+  },
+  "path_policy": {
+    "capsule_first": true,
+    "append_host_path": true,
+    "reason": "Capsule sh/curl/jq/coreutils must win over any host curl.exe or Git-Bash tools. Host python/git/node/rg stay reachable after bin/."
+  },
+  "process_notes": {
+    "ps": "msys2-runtime ships Cygwin-style ps.exe, not Linux procps. seed.sh uses `ps -eo pid= -o ppid=`; Windows process-tree kill is the launcher Job Object task.",
+    "kill": "msys2-runtime kill.exe. Do not expect Linux /proc semantics."
+  }
+}

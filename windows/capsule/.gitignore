@@ -1,0 +1,7 @@
+/cache/
+/out/
+*.pkg.tar.zst
+*.pkg.tar.xz
+*.pkg.tar.gz
+/msys.db
+/msys.db.tar
