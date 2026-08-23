@@ -998,7 +998,10 @@ run_loop() {
     if [ "$ntools" -gt 0 ]; then
       # Show what the model is about to do. Final-answer turns have no
       # tools and still print once on stdout; do not echo those here.
-      if [ -n "$content" ]; then
+      # When the live stream is on (the init ceremony) this same text has
+      # already gone to the terminal delta by delta, so echoing it again
+      # prints every line twice.
+      if [ -n "$content" ] && [ "${SEED_STREAM_PRINT:-}" != 1 ]; then
         printf '%s\n' "$content" >&2
       fi
       jq --argjson t "$(jq '.tool_calls' "$evdir/turn-$round.json")" \
