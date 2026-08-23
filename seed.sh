@@ -155,6 +155,20 @@ pack_root() {
   printf '%s' "${SEED_PACK_ROOT:-https://raw.githubusercontent.com/Leehow/seed/main/packs}"
 }
 
+# The published site. One knob when the host moves; the three endpoints
+# below stay individually overridable for testing against a branch.
+seed_site() {
+  printf '%s' "${SEED_SITE:-https://seed-agents.com}"
+}
+
+packs_index_url() {
+  printf '%s' "${SEED_PACKS_INDEX:-$(seed_site)/dl/packs.json}"
+}
+
+packs_dl_url() {
+  printf '%s' "${SEED_PACKS_DL:-$(seed_site)/dl/packs}/$1.json"
+}
+
 pack_join() {
   base=$1
   rel=$2
@@ -1585,7 +1599,7 @@ seed_runtime_ok() {
 seed_materialize() {
   dest=$INSTALL/.seed-runtime.sh
   seed_runtime_ok "$dest" && return 0
-  src=${SEED_RUNTIME_URL:-https://seed-agents.com/dl/seed.sh}
+  src=${SEED_RUNTIME_URL:-$(seed_site)/dl/seed.sh}
   tmp=$dest.tmp
   case $src in
     /*) [ -f "$src" ] && cp "$src" "$tmp" || die 'cannot materialize seed runtime: source missing' 69 ;;
@@ -1733,7 +1747,7 @@ seed_http_err() {
 seed_packs_list() {
   need curl
   need jq
-  url=https://seed-agents.com/dl/packs.json
+  url=$(packs_index_url)
   body=$(mktemp "${TMPDIR:-/tmp}/seed-packs.XXXXXX")
   if ! http_get "$url" "$body"; then
     seed_http_err 'packs catalog'
@@ -1768,7 +1782,7 @@ seed_packs_install() {
   fi
   need curl
   need jq
-  url=https://seed-agents.com/dl/packs/$slug.json
+  url=$(packs_dl_url "$slug")
   body=$(mktemp "${TMPDIR:-/tmp}/seed-pinst.XXXXXX")
   if ! http_get "$url" "$body"; then
     seed_http_err "pack $slug"
