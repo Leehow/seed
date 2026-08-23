@@ -32,7 +32,7 @@ The answer so far: yes, and the constraint turns out to be a feature. A single p
 - **The shell owns the loop; the model owns the judgment.** The main loop, SSE streaming, error handling, and round limits live in the shell. What to look at, what to change, and when to stop are the model's decisions. The model is never asked to write its own controller each turn.
 - **Exactly two API tools.** A persistent `shell` (cwd and environment survive across calls) and an exact-replace `edit` (match zero or multiple times → fail, file untouched). No read/grep/glob/todo tools — those are ordinary commands inside the shell. "Two tools" is not "two abilities": everything the machine has is reachable through them.
 - **Find, verify, register, reuse — build only as a last resort.** On first start the seed surveys the machine and writes a capability index. If `rg` exists, use `rg`; if the box has Codex installed, register it. On a clean box with no `fd`, the agent looked up that Debian ships it as `fd-find` with binary `fdfind`, installed it, and finished the search task. Tool discovery is a graded skill, not an assumption.
-- **Extensions ship as prompts, not code.** The plugin catalog under [`plugins/agent/`](plugins/agent/) publishes JSON prompts and empty scaffolds. New capabilities are grown by the model on the local machine, guided by prompts — never by fattening the seed.
+- **Extensions ship as prompts, not code.** The pack catalog under [`packs/agent/`](packs/agent/) publishes JSON prompts and empty scaffolds. New capabilities are grown by the model on the local machine, guided by prompts — never by fattening the seed.
 - **Never trust the model's word for it.** The interactive `/ini` command lets the model choose how to install the runtime as a global `seed` command, but the shell independently notarizes the result: the receipt, the frozen original PATH, the executable entry point, and a `--probe` identity check must all agree before success is declared. Fake receipts and PATH pollution are part of the test suite.
 
 ## What it can do
@@ -73,7 +73,7 @@ Each task container gets only the standalone `seed.sh` plus curl and CA certific
 
 We typed the seed into a stock Android tablet's Termux over adb: it self-healed the missing jq, initialized, and opened its `>` prompt. Then we gave it one task — *"make a 3D web game"* — and the agent on the tablet did the rest unaided: a single-file three.js game, served with `nohup python -m http.server 8080`, `curl localhost:8080` checked for 200 **before** the URL was reported, playable by touch.
 
-Then we asked whether the tablet could drop the terminal entirely. A second prompt block, [`web-ide.json`](plugins/agent/web-ide.json), ships no code at all: it describes an evidence contract and eleven acceptance checks, and the agent grows the console on the machine from that. The design it is held to is deliberately narrow — the shell keeps the loop, the server renders the run feed to HTML, and the page is a view over the evidence a run already writes to disk. Nothing in the console re-implements turns, tool dispatch, or streaming.
+Then we asked whether the tablet could drop the terminal entirely. A second pack, [`web-ide.json`](packs/agent/web-ide.json), ships no code at all: it describes an evidence contract and eleven acceptance checks, and the agent grows the console on the machine from that. The design it is held to is deliberately narrow — the shell keeps the loop, the server renders the run feed to HTML, and the page is a view over the evidence a run already writes to disk. Nothing in the console re-implements turns, tool dispatch, or streaming.
 
 The console runs on `127.0.0.1` under a Termux wake lock. Into its text box, on the tablet, a human typed one sentence:
 
@@ -88,11 +88,11 @@ No human wrote a line of either game. The runtime that did this is the same sing
 ### Notarized install and offline contract tests
 
 - `/ini` acceptance has been tested against fake receipts and PATH pollution: the model claiming success does nothing; the shell re-resolves `seed` with the frozen pre-run PATH and re-checks identity via `--probe`.
-- An offline product contract (fake plugin transport + LLM stub; no network, no real keys) covers 20+ cases: SSE chunk merging, truncated streams triggering a retry, empty replies never being accepted as a final answer, and more.
+- An offline product contract (fake pack transport + LLM stub; no network, no real keys) covers 20+ cases: SSE chunk merging, truncated streams triggering a retry, empty replies never being accepted as a final answer, and more.
 
 ## Usage
 
-Download `seed.sh` from GitHub main first — do not `curl | sh`. The plugin catalog is fetched from this repo's raw `plugins/` by default (`https://raw.githubusercontent.com/Leehow/seed/main/plugins`); override with `SEED_PLUGIN_ROOT`.
+Download `seed.sh` from GitHub main first — do not `curl | sh`. The pack catalog is fetched from this repo's raw `packs/` by default (`https://raw.githubusercontent.com/Leehow/seed/main/packs`); override with `SEED_PACK_ROOT`.
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/Leehow/seed/main/seed.sh -o seed.sh
@@ -130,16 +130,16 @@ This GitHub tree **is** the product: [`seed.sh`](seed.sh) plus the prompt catalo
 /bin/sh -n seed.sh
 ```
 
-The catalog in [`plugins/agent/`](plugins/agent/) publishes prompts, not a second runtime. Change the agent's temperament by changing those JSON files; do not fatten `seed.sh`.
+The catalog in [`packs/agent/`](packs/agent/) publishes prompts, not a second runtime. Change the agent's temperament by changing those JSON files; do not fatten `seed.sh`.
 
 ## What's in this repo
 
 | Path | Role |
 |---|---|
 | [`seed.sh`](seed.sh) | the whole runtime — download it and run |
-| [`plugins/agent/`](plugins/agent/) | prompt catalog: init, skills, commands, lazy extensions |
-| [`plugins/seed/`](plugins/seed/) | provider / model catalog |
-| [`plugins/jq/`](plugins/jq/) | jq fallback notes and fetch helper |
+| [`packs/agent/`](packs/agent/) | prompt catalog: init, skills, commands, lazy extensions |
+| [`packs/seed/`](packs/seed/) | provider / model catalog |
+| [`packs/jq/`](packs/jq/) | jq fallback notes and fetch helper |
 | [`LICENSE`](LICENSE) | MIT |
 
 ## Honest limits

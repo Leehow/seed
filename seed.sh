@@ -158,21 +158,21 @@ ensure_gitignore() {
   grep -qxF 'bin/jq.exe' "$g" || printf 'bin/jq.exe\n' >> "$g"
 }
 
-plugin_root() {
-  printf '%s' "${SEED_PLUGIN_ROOT:-https://raw.githubusercontent.com/Leehow/seed/main/plugins}"
+pack_root() {
+  printf '%s' "${SEED_PACK_ROOT:-https://raw.githubusercontent.com/Leehow/seed/main/packs}"
 }
 
-plugin_join() {
+pack_join() {
   base=$1
   rel=$2
   case $rel in
     http*://*) printf '%s' "$rel" ;;
-    /*) printf '%s%s' "$(plugin_root)" "$rel" ;;
+    /*) printf '%s%s' "$(pack_root)" "$rel" ;;
     *) printf '%s/%s' "$base" "$rel" ;;
   esac
 }
 
-# One GET for every plugin fetch. Body lands in dest; HTTP_CODE and
+# One GET for every pack fetch. Body lands in dest; HTTP_CODE and
 # HTTP_CURL carry the outcome. Returns 0 only on curl ok + HTTP 2xx.
 http_get() {
   hg_url=$1
@@ -196,16 +196,16 @@ http_get() {
   return 1
 }
 
-plugin_get() {
-  pg_body=$(mktemp "${TMPDIR:-/tmp}/seed-plug.XXXXXX")
+pack_get() {
+  pg_body=$(mktemp "${TMPDIR:-/tmp}/seed-pack.XXXXXX")
   if http_get "$1" "$pg_body" "${2:-}"; then
     cat "$pg_body"
     rm -f "$pg_body"
     return 0
   fi
   rm -f "$pg_body"
-  [ "$HTTP_CURL" -eq 0 ] || die "plugin: network failed (curl=$HTTP_CURL)" 71
-  die "plugin: HTTP $HTTP_CODE" 72
+  [ "$HTTP_CURL" -eq 0 ] || die "pack: network failed (curl=$HTTP_CURL)" 71
+  die "pack: HTTP $HTTP_CODE" 72
 }
 
 api_origin() {
@@ -215,12 +215,12 @@ api_origin() {
 load_channel_from_catalog() {
   channel=$1
   need jq
-  root=$(plugin_root)
+  root=$(pack_root)
   seeddir=$root/seed
-  index=$(plugin_get "$seeddir/index.json")
+  index=$(pack_get "$seeddir/index.json")
   rel=$(printf '%s' "$index" | jq -r '.models // empty')
-  [ -n "$rel" ] || die 'seed index has no models plugin' 69
-  catalog=$(plugin_get "$(plugin_join "$seeddir" "$rel")")
+  [ -n "$rel" ] || die 'seed index has no models pack' 69
+  catalog=$(pack_get "$(pack_join "$seeddir" "$rel")")
   row=$(printf '%s' "$catalog" | jq -c --arg n "$channel" '.[$n] // empty')
   if [ -z "$row" ]; then
     keys=$(printf '%s' "$catalog" | jq -r 'keys | join(" ")')
@@ -228,11 +228,11 @@ load_channel_from_catalog() {
   fi
   raw_api=$(printf '%s' "$row" | jq -r '.api_url // empty')
   [ -n "$raw_api" ] || die "channel $channel has no api_url" 69
-  LLM_API_URL=$(plugin_join "$seeddir" "$raw_api")
+  LLM_API_URL=$(pack_join "$seeddir" "$raw_api")
   LLM_EXTRA=$(printf '%s' "$row" | jq -c '.extra // {}')
   raw_models=$(printf '%s' "$row" | jq -r '.models_url // empty')
   if [ -n "$raw_models" ]; then
-    MODELS_URL=$(plugin_join "$seeddir" "$raw_models")
+    MODELS_URL=$(pack_join "$seeddir" "$raw_models")
   else
     case $LLM_API_URL in
       */chat/completions) MODELS_URL=${LLM_API_URL%/chat/completions}/models ;;
@@ -243,7 +243,7 @@ load_channel_from_catalog() {
 
 pick_model_once() {
   need jq
-  list=$(plugin_get "$MODELS_URL" "$LLM_API_KEY")
+  list=$(pack_get "$MODELS_URL" "$LLM_API_KEY")
   ids=$(printf '%s' "$list" | jq -r '.data[].id // empty')
   [ -n "$ids" ] || die 'model list is empty' 72
   printf '%s\n' "$ids" | awk '{print NR") "$0}' >&2
@@ -371,7 +371,7 @@ The task is the human's last message. Do not replace it with Machine index key n
 Before acting, read the Machine index with shell (jq, not cat of the whole file) and follow system.retrieve.
 The index is a helper catalog, not the problem. jq it for ok matches; do not rewrite the human's ask into index key names.
 When the human asks about skills or SKILL.md, open https://agentskills.io/specification with shell first.
-When the human's message starts with /, it is a slash command, not a coding task: follow system.retrieve and build the commands block first if the table is missing.
+When the human's message starts with /, it is a slash command, not a coding task: follow system.retrieve and build the commands pack first if the table is missing.
 When the human asks what tools you have, what you can use, or what was indexed: first jq the Machine index. Then list (1) the two API tools shell and edit, (2) every ok entry that system.retrieve tells you to use. Mention present-but-not-ok items separately. Do not answer with only shell and edit. Do not dump the raw index.
 Reply in the same language the human just used.
 Do not stream your process to the human. When the task is done, reply with a short final answer and no tool_calls.
@@ -1101,12 +1101,12 @@ agent_state_lines() {
     "Tools ok: " + ([.system.tools // {} | to_entries[]
       | select(.value.ok == true) | .key] | join(" ")),
     "Blocks: " + (
-      (["skills","commands","models","plugins","delegate"]
+      (["skills","commands","models","packs","delegate"]
         - [(.ours.seed_agent // {}) | to_entries[]
            | select(.value == "done") | .key]) as $missing
       | if ($missing | length) == 0 then "all built"
         else "missing " + ($missing | join(" "))
-          + " - build a block only when the task needs it, per system.retrieve"
+          + " - build a pack only when the task needs it, per system.retrieve"
         end)
   ' "$sf" 2>/dev/null || true
 }
@@ -1123,20 +1123,20 @@ product_system() {
   agent_run_hooks system
 }
 
-agent_plugin_get() {
-  ap_body=$(mktemp "${TMPDIR:-/tmp}/seed-aplg.XXXXXX")
+agent_pack_get() {
+  ap_body=$(mktemp "${TMPDIR:-/tmp}/seed-apack.XXXXXX")
   if http_get "$1" "$ap_body"; then
     cat "$ap_body"
     rm -f "$ap_body"
     return 0
   fi
   rm -f "$ap_body"
-  [ "$HTTP_CURL" -eq 0 ] || die "agent plugin: network failed (curl=$HTTP_CURL)" 71
-  die "agent plugin: HTTP $HTTP_CODE" 72
+  [ "$HTTP_CURL" -eq 0 ] || die "agent pack: network failed (curl=$HTTP_CURL)" 71
+  die "agent pack: HTTP $HTTP_CODE" 72
 }
 
 # Best-effort GET into dest. 404 / network fail: leave dest, return 1.
-agent_plugin_try() {
+agent_pack_try() {
   at_body=$(mktemp "${TMPDIR:-/tmp}/seed-aptry.XXXXXX")
   if http_get "$1" "$at_body"; then
     mv "$at_body" "$2"
@@ -1150,8 +1150,8 @@ agent_fetch_hooks() {
   store=$INSTALL/agent-store
   catf=$store/catalog.json
   [ -f "$catf" ] || return 0
-  mkdir -p "$store/plugins"
-  root=$(plugin_root)
+  mkdir -p "$store/packs"
+  root=$(pack_root)
   jq -r '.hooks | .. | strings' "$catf" 2>/dev/null | sort -u | while IFS= read -r rel; do
     [ -n "$rel" ] || continue
     case $rel in
@@ -1161,8 +1161,8 @@ agent_fetch_hooks() {
     case $rel in
       *..*|/*) continue ;;
     esac
-    dest=$store/plugins/$(basename "$rel")
-    agent_plugin_try "$(plugin_join "$root/agent" "$rel")" "$dest" || true
+    dest=$store/packs/$(basename "$rel")
+    agent_pack_try "$(pack_join "$root/agent" "$rel")" "$dest" || true
   done
 }
 
@@ -1175,7 +1175,7 @@ agent_run_hooks() {
   export SLAB_MACHINE_INDEX
   jq -r --arg p "$phase" '.hooks[$p][]? // empty' "$catf" 2>/dev/null | while IFS= read -r rel; do
     [ -n "$rel" ] || continue
-    script=$store/plugins/$(basename "$rel")
+    script=$store/packs/$(basename "$rel")
     [ -f "$script" ] || continue
     case $phase in
       system) /bin/sh "$script" blurb || true ;;
@@ -1195,7 +1195,7 @@ agent_ready() {
 # invent a system object if the model deleted it.
 agent_repair_machine_tree() {
   f=$INSTALL/agent-store/index.json
-  pack=$INSTALL/agent-store/plugins/init.json
+  pack=$INSTALL/agent-store/packs/init.json
   [ -f "$f" ] || return 1
   [ -f "$pack" ] || return 1
   tmp=$(mktemp "${TMPDIR:-/tmp}/seed-repair.XXXXXX")
@@ -1266,7 +1266,7 @@ agent_discard_baseline() {
 # so a half-written tree cannot poison the fallback.
 agent_write_baseline() {
   store=$INSTALL/agent-store
-  pack=$store/plugins/init.json
+  pack=$store/packs/init.json
   base=$(agent_baseline_file)
   [ -f "$pack" ] || return 1
   pj=$(mktemp "${TMPDIR:-/tmp}/seed-basep.XXXXXX")
@@ -1309,43 +1309,43 @@ agent_fetch_pack() {
   fp_strict=$1
   fp_index=$2
   store=$INSTALL/agent-store
-  mkdir -p "$store/plugins"
-  root=$(plugin_root)
+  mkdir -p "$store/packs"
+  root=$(pack_root)
   rel=$(printf '%s' "$fp_index" | jq -r '.required.init // empty')
-  [ -n "$rel" ] || die "agent plugin: catalog has no required.init" 69
-  body=$(agent_plugin_get "$(plugin_join "$root/agent" "$rel")")
+  [ -n "$rel" ] || die "agent pack: catalog has no required.init" 69
+  body=$(agent_pack_get "$(pack_join "$root/agent" "$rel")")
   if [ "$fp_strict" -eq 1 ]; then
     printf '%s' "$body" | jq -e \
       'type == "object" and has("prompt") and has("machine_tree") and has("memory_tree")' \
-      >/dev/null 2>&1 || die "agent plugin: init pack invalid" 69
+      >/dev/null 2>&1 || die "agent pack: init pack invalid" 69
   else
     printf '%s' "$body" | jq -e 'has("prompt")' >/dev/null 2>&1 \
-      || die "agent plugin: init pack invalid" 69
+      || die "agent pack: init pack invalid" 69
   fi
   tmpc=$(mktemp "${TMPDIR:-/tmp}/seed-acat.XXXXXX")
   tmpi=$(mktemp "${TMPDIR:-/tmp}/seed-ainit.XXXXXX")
   printf '%s\n' "$fp_index" > "$tmpc"
   printf '%s\n' "$body" > "$tmpi"
-  mv "$tmpi" "$store/plugins/init.json"
+  mv "$tmpi" "$store/packs/init.json"
   mv "$tmpc" "$store/catalog.json"
   agent_fetch_hooks
 }
 
 agent_fetch_required() {
   store=$INSTALL/agent-store
-  mkdir -p "$store/plugins"
-  if [ -f "$store/catalog.json" ] && [ -f "$store/plugins/init.json" ]; then
+  mkdir -p "$store/packs"
+  if [ -f "$store/catalog.json" ] && [ -f "$store/packs/init.json" ]; then
     agent_fetch_hooks
     return 0
   fi
-  root=$(plugin_root)
-  index=$(agent_plugin_get "$root/agent/index.json")
+  root=$(pack_root)
+  index=$(agent_pack_get "$root/agent/index.json")
   printf '%s' "$index" | jq -e 'type == "object"' >/dev/null 2>&1 \
-    || die "agent plugin: catalog is not JSON" 69
+    || die "agent pack: catalog is not JSON" 69
   agent_fetch_pack 1 "$index"
 }
 
-# agent_update dies on a bad fetch (agent_plugin_get). A ready machine must
+# agent_update dies on a bad fetch (agent_pack_get). A ready machine must
 # still start with no network, so run it in a subshell: the die exits only
 # the child and a failed refresh is a skipped refresh, never a failed launch.
 agent_try_update() {
@@ -1354,14 +1354,14 @@ agent_try_update() {
   if ( agent_update ) 2>/dev/null; then
     return 0
   fi
-  printf 'note: plugin catalog refresh skipped\n' >&2
+  printf 'note: pack catalog refresh skipped\n' >&2
   return 0
 }
 
 agent_place_trees() {
   store=$INSTALL/agent-store
-  pack=$store/plugins/init.json
-  [ -f "$pack" ] || die "agent plugin: init pack missing" 69
+  pack=$store/packs/init.json
+  [ -f "$pack" ] || die "agent pack: init pack missing" 69
   if [ ! -f "$store/index.json" ]; then
     jq '.machine_tree' "$pack" > "$store/index.json"
   fi
@@ -1426,9 +1426,9 @@ agent_probe_tools() {
 }
 
 agent_run_init() {
-  pack=$INSTALL/agent-store/plugins/init.json
+  pack=$INSTALL/agent-store/packs/init.json
   prompt=$(jq -r '.prompt // empty' "$pack")
-  [ -n "$prompt" ] || die "agent plugin: init prompt empty" 69
+  [ -n "$prompt" ] || die "agent pack: init prompt empty" 69
   ev=${AGENT_RUNS_DIR:-$PWD/.agent-runs}/$(date -u +%Y%m%dT%H%M%SZ)-$$-init
   sess=$ev/session
   mkdir -p "$ev"
@@ -1447,7 +1447,7 @@ agent_ensure_init() {
   if agent_check_machine_tree; then
     # A ready machine never re-ran init, so without this the catalog stayed
     # frozen at whatever version first installed it and a newly published
-    # optional block could never reach an existing install.
+    # optional pack could never reach an existing install.
     agent_try_update
     # Engine owns system.tools. Re-probe every ready launch so a model
     # overwrite or a later apt install cannot leave stale false slots.
@@ -1488,11 +1488,11 @@ agent_ensure_init() {
 
 agent_update() {
   store=$INSTALL/agent-store
-  mkdir -p "$store/plugins"
-  root=$(plugin_root)
-  index=$(agent_plugin_get "$root/agent/index.json")
+  mkdir -p "$store/packs"
+  root=$(pack_root)
+  index=$(agent_pack_get "$root/agent/index.json")
   printf '%s' "$index" | jq -e 'type == "object"' >/dev/null 2>&1 \
-    || die "agent plugin: catalog is not JSON" 69
+    || die "agent pack: catalog is not JSON" 69
   nv=$(printf '%s' "$index" | jq -r '.version // empty')
   nu=$(printf '%s' "$index" | jq -r '.updated // empty')
   ov=; ou=
@@ -1505,7 +1505,7 @@ agent_update() {
   fi
   agent_fetch_pack 0 "$index"
   if [ -f "$store/index.json" ]; then
-    nr=$(jq -r '.machine_tree.system.retrieve // empty' "$store/plugins/init.json")
+    nr=$(jq -r '.machine_tree.system.retrieve // empty' "$store/packs/init.json")
     if [ -n "$nr" ]; then
       tmpi2=$(mktemp "${TMPDIR:-/tmp}/seed-uret.XXXXXX")
       jq --arg r "$nr" '

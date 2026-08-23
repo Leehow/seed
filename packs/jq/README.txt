@@ -4,4 +4,4 @@ When jq is missing, seed downloads the matching binary from official GitHub Rele
 by OS/arch (jqlang/jq, default 1.7.1), unless SEED_JQ_URL overrides the URL.
 
 This directory can still be populated for manual use:
-  sh plugins/jq/fetch.sh
+  sh packs/jq/fetch.sh

@@ -32,7 +32,7 @@ cd 你的项目
 - **外壳拥有循环，模型拥有判断。** 主循环、SSE 流、错误处理、轮数控制在 shell 里；看什么、改什么、什么时候结束由模型决定。不让模型每轮另写 controller。
 - **API 工具只有两个。** 持久 `shell`（`cd` 和环境变量跨调用保留）和精确替换 `edit`（匹配 0 次或多次都失败、文件不动）。不加 read/grep/glob/todo——那些都是 shell 里的普通命令。「只有两个工具」不等于「只能做两件事」：机器上有的一切都够得着。
 - **先找、验证、登记、复用，找不到才造。** 首次启动普查本机能力，写入 Machine index：有 rg 就用 rg，装了 Codex 也登记。干净机上没有 `fd`，agent 查到 Debian 的包名是 `fd-find`、二进制叫 `fdfind`，装完接着完成检索任务。找工具是一项被打分的能力，不是一个假设。
-- **扩展只发提示词，不发代码。** [`plugins/agent/`](plugins/agent/) 的 catalog 里是 JSON prompt 和空树模板。新能力由模型按提示词在本机自己长出来——绝不靠加厚种子。
+- **扩展只发提示词，不发代码。** [`packs/agent/`](packs/agent/) 的 catalog 里是 JSON prompt 和空树模板。新能力由模型按提示词在本机自己长出来——绝不靠加厚种子。
 - **不信模型的口头汇报。** 交互里的 `/ini` 让模型自选方式把 runtime 安装成全局 `seed` 命令，但外壳独立公证：回执、启动时冻结的原始 PATH、可执行入口、`--probe` 身份检查，全部对上才算成功。假回执和 PATH 污染都在测试套件里。
 
 ## 它能做什么
@@ -73,7 +73,7 @@ cd 你的项目
 
 我们用 adb 把种子敲进一台普通安卓平板的 Termux：无 jq 环境自愈、初始化、打开 `>` 提示符。然后只给了一个任务——「做一个 3D 网页游戏」——平板上的 agent 独立完成了剩下的一切：写出单文件 three.js 游戏，`nohup python -m http.server 8080` 起服务，自己 `curl localhost:8080` 验证 200 之后才汇报 URL，浏览器打开即玩。
 
-接着我们问：这台平板能不能干脆不要终端。第二个提示词块 [`web-ide.json`](plugins/agent/web-ide.json) 不含任何代码，它描述的是一份证据契约和十一条验收检查，控制台由 agent 在本机长出来。它被约束的设计很窄——loop 仍归 shell，服务端把运行流渲染成 HTML，页面只是「一次运行本来就落盘的证据」的一个视图。控制台里没有任何一处重新实现轮次、工具分发或流式传输。
+接着我们问：这台平板能不能干脆不要终端。第二个 pack [`web-ide.json`](packs/agent/web-ide.json) 不含任何代码，它描述的是一份证据契约和十一条验收检查，控制台由 agent 在本机长出来。它被约束的设计很窄——loop 仍归 shell，服务端把运行流渲染成 HTML，页面只是「一次运行本来就落盘的证据」的一个视图。控制台里没有任何一处重新实现轮次、工具分发或流式传输。
 
 控制台绑在 `127.0.0.1`，持着 Termux 唤醒锁。有人在平板上，往它的输入框里敲了一句话：
 
@@ -88,11 +88,11 @@ cd 你的项目
 ### 安装公证与离线合同
 
 - `/ini` 的验收对抗过假回执和 PATH 污染：模型说装好了没有用；外壳用启动时冻结的 PATH 重新解析 `seed`，再跑 `--probe` 核对身份。
-- 离线产品合同（假 plugin transport + LLM stub，不联网、不要真 key）覆盖 20+ 项：SSE 分片合并、断流触发重试、空回复不当终稿等。
+- 离线产品合同（假 pack transport + LLM stub，不联网、不要真 key）覆盖 20+ 项：SSE 分片合并、断流触发重试、空回复不当终稿等。
 
 ## 使用
 
-先从 GitHub main 下载 `seed.sh`，不要 `curl | sh`。插件 catalog 默认从本仓库 raw `plugins/` 拉取（`https://raw.githubusercontent.com/Leehow/seed/main/plugins`）；可用 `SEED_PLUGIN_ROOT` 覆盖。
+先从 GitHub main 下载 `seed.sh`，不要 `curl | sh`。pack catalog 默认从本仓库 raw `packs/` 拉取（`https://raw.githubusercontent.com/Leehow/seed/main/packs`）；可用 `SEED_PACK_ROOT` 覆盖。
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/Leehow/seed/main/seed.sh -o seed.sh
@@ -130,16 +130,16 @@ seed -p "任务"
 /bin/sh -n seed.sh
 ```
 
-[`plugins/agent/`](plugins/agent/) 里发布的是提示词，不是另一套 runtime。换脾气、换扩展，只改那些 JSON，不要加厚 `seed.sh`。
+[`packs/agent/`](packs/agent/) 里发布的是提示词，不是另一套 runtime。换脾气、换扩展，只改那些 JSON，不要加厚 `seed.sh`。
 
 ## 这个仓库里有什么
 
 | 路径 | 角色 |
 |---|---|
 | [`seed.sh`](seed.sh) | 完整 runtime——下载就能跑 |
-| [`plugins/agent/`](plugins/agent/) | 提示词 catalog：初始化、skills、commands、懒构建扩展 |
-| [`plugins/seed/`](plugins/seed/) | provider / model catalog |
-| [`plugins/jq/`](plugins/jq/) | jq 回退说明与拉取脚本 |
+| [`packs/agent/`](packs/agent/) | 提示词 catalog：初始化、skills、commands、懒构建扩展 |
+| [`packs/seed/`](packs/seed/) | provider / model catalog |
+| [`packs/jq/`](packs/jq/) | jq 回退说明与拉取脚本 |
 | [`LICENSE`](LICENSE) | MIT |
 
 ## 诚实的边界

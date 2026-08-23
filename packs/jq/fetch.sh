@@ -1,5 +1,5 @@
 #!/bin/sh
-# Download official jq 1.7.1 assets into this directory (plugin mirror).
+# Download official jq 1.7.1 assets into this directory (pack mirror).
 set -eu
 DIR=$(CDPATH= cd "$(dirname "$0")" && pwd -P)
 VER=1.7.1

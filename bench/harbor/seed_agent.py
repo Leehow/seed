@@ -89,9 +89,9 @@ class SeedAgent(BaseInstalledAgent):
             "AGENT_RUNS_DIR": _CONTAINER_RUNS,
             "AGENT_MAX_ROUNDS": os.environ.get("AGENT_MAX_ROUNDS", "80"),
         }
-        plugin = self._get_env("SEED_PLUGIN_ROOT")
-        if plugin:
-            env["SEED_PLUGIN_ROOT"] = plugin
+        pack = self._get_env("SEED_PACK_ROOT")
+        if pack:
+            env["SEED_PACK_ROOT"] = pack
         return env
 
     def _task_timeout_sec(self) -> float | None:
