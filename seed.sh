@@ -73,9 +73,6 @@ ensure_jq() {
   if [ "${SEED_FORCE_JQ:-}" != 1 ] && command -v jq >/dev/null 2>&1; then
     return 0
   fi
-  # Termux: Android app processes reject the non-PIE official jq binary
-  # (unexpected e_type), so the platform package manager is the only
-  # working source. One quiet try, then fall through to the download.
   case ${PREFIX:-} in
     *com.termux*)
       if command -v pkg >/dev/null 2>&1; then
@@ -256,7 +253,6 @@ pick_model_once() {
   esac
 }
 
-# Soft pick for URL install: network/empty list is not fatal.
 try_pick_model() {
   need jq
   [ -n "${MODELS_URL:-}" ] || return 1
@@ -406,8 +402,6 @@ edit_main() {
   [ -n "$old" ] || { printf 'edit: old_text is empty\n' >&2; return 2; }
   [ -f "$path" ] || { printf 'edit: cannot read %s\n' "$path" >&2; return 66; }
   tmp=$(mktemp "${TMPDIR:-/tmp}/seed-edit.XXXXXX")
-  # || capture, not set +e/-e: re-enabling errexit here would undo the
-  # loop's guard, so one bad edit would kill the whole agent.
   es=0
   jq -nr --rawfile t "$path" --arg old "$old" --arg new "$new" '
     ($t | split($old)) as $p
@@ -455,13 +449,11 @@ while [ -f "$SESSION/alive" ]; do
   : > "$SESSION/done"
 done
 EOS
-  # Always /bin/sh. zsh ties `path` to PATH; models write path=$(command -v).
   /bin/sh "$session/worker.sh" "$session" \
     </dev/null >"$session/worker.out" 2>"$session/worker.err" &
   echo $! > "$session/pid"
 }
 
-# pid/ppid listing works on macOS and Linux; no pgrep.
 child_pids() {
   ps -eo pid= -o ppid= 2>/dev/null | awk -v p="$1" '$2==p {print $1}'
 }
@@ -493,8 +485,6 @@ shell_run() {
   : > "$session/stderr"
   printf '%s\n' "$cmd" > "$session/request.tmp"
   mv "$session/request.tmp" "$session/request"
-  # Poll in 0.05s ticks when sleep takes decimals (worker does the same);
-  # 20 ticks equal one second so the timeout math stays in seconds.
   n=0
   max=$((ACTION_TIMEOUT * 20))
   while [ ! -f "$session/done" ]; do
@@ -604,8 +594,6 @@ parse_stream() {
 }
 
 stream_print() {
-  # Dual duty: archive every raw line (no tee dependency) and optionally
-  # print delta content to stderr. $1 is the raw capture file.
   sp_raw=$1
   : > "$sp_raw"
   while IFS= read -r line || [ -n "$line" ]; do
@@ -632,17 +620,12 @@ llm_context_overflow() {
   grep -qiE 'context_length|context length|too many tokens|maximum context|prompt is too long|prompt_too_long' "$1" 2>/dev/null
 }
 
-# Model errors return instead of exiting so an interactive window can
-# survive one bad turn. Transient failures (network, truncated stream,
-# 429, 5xx) get one retry; 401/403/400 do not.
 model_turn() {
   in_msgs=$1
   dest=$2
   work=$(mktemp -d "${TMPDIR:-/tmp}/seed-llm.XXXXXX")
   strip_msg_thinking "$in_msgs" "$work/msgs.json"
   if [ -n "${SEED_LLM_STUB:-}" ]; then
-    # || capture, not set +e/-e: flipping errexit inside a function
-    # would undo the caller's guard and kill the interactive window.
     st=0
     "$SEED_LLM_STUB" --messages "$work/msgs.json" > "$dest" || st=$?
     rm -rf "$work"
@@ -686,9 +669,6 @@ model_turn() {
     fi
     case "$cs:${code:-}" in
       0:2*)
-        # A 2xx stream with no finish_reason means the connection died
-        # mid-turn (stall kill, proxy cut). Retry; never parse a half turn
-        # into an empty final answer.
         if [ "$stream" = true ] \
           && ! grep -q '"finish_reason"[[:space:]]*:[[:space:]]*"' "$work/raw"; then
           if [ "$try" -eq 1 ]; then
@@ -753,8 +733,6 @@ llm_main() {
       *) die "llm: unknown argument $1" 64 ;;
     esac
   done
-  # Own dir name: model_turn reuses the global work variable (sh has no
-  # locals) and removes its dir, which used to orphan this one.
   lw=$(mktemp -d "${TMPDIR:-/tmp}/seed-llmcli.XXXXXX")
   trap 'rm -rf "$lw"' EXIT
   if [ -n "$msgs" ]; then cp "$msgs" "$lw/m.json"
@@ -767,7 +745,6 @@ llm_main() {
   jq -r '.content // empty' "$lw/t.json"
 }
 
-# Compact when prompt_tokens cross 70% of the window. Protect SYSTEM.
 agent_compact() {
   ac_msgs=$1
   ac_tok=$2
@@ -851,7 +828,6 @@ agent_compact() {
   fi
 }
 
-# Best-effort prune summary; nonzero means the caller should just clear.
 agent_summarize() {
   as_msgs=$1
   as_p=$2
@@ -997,11 +973,6 @@ run_loop() {
     content=$(jq -r '.content // empty' "$evdir/turn-$round.json")
     ntools=$(jq '.tool_calls | length' "$evdir/turn-$round.json")
     if [ "$ntools" -gt 0 ]; then
-      # Show what the model is about to do. Final-answer turns have no
-      # tools and still print once on stdout; do not echo those here.
-      # When the live stream is on (the init ceremony) this same text has
-      # already gone to the terminal delta by delta, so echoing it again
-      # prints every line twice.
       if [ -n "$content" ] && [ "${SEED_STREAM_PRINT:-}" != 1 ]; then
         printf '%s\n' "$content" >&2
       fi
@@ -1144,7 +1115,6 @@ agent_ready() {
   jq -e '.ready == true' "$f" >/dev/null 2>&1
 }
 
-# Salvage a useful but misshapen Machine index; do not invent .system.
 agent_repair_machine_tree() {
   f=$INSTALL/agent-store/index.json
   pack=$INSTALL/agent-store/packs/init.json
@@ -1291,7 +1261,6 @@ agent_fetch_required() {
   agent_fetch_pack 1 "$index"
 }
 
-# agent_update dies on fetch; a subshell keeps a ready machine offline-startable.
 agent_try_update() {
   [ "${SEED_SKIP_UPDATE:-}" = 1 ] && return 0
   [ -f "$INSTALL/agent-store/catalog.json" ] || return 0
@@ -1450,7 +1419,6 @@ agent_update() {
   fi
 }
 
-# Standalone seed entry. The shared engine above remains the only agent loop.
 seed_usage() {
   printf 'usage: sh seed.sh <channel|api-url> <API_KEY> [model]\n' >&2
   printf '       sh seed.sh setup\n' >&2
@@ -1473,7 +1441,35 @@ seed_state_root() {
   fi
 }
 
-seed_mv() { mv "$1" "$2.new" && mv "$2.new" "$2"; }
+seed_mv() {
+  SEED_MV_N=$((${SEED_MV_N:-0} + 1))
+  [ "${SEED_TEST_FAIL_AT:-}" = "$SEED_MV_N" ] && return 1
+  mv "$1" "$2.new" && mv "$2.new" "$2"
+}
+
+seed_pack_undo() {
+  u=$1 s=$2 r=$3
+  for f in "$u/bak/p"/*; do
+    [ -f "$f" ] || continue
+    mv "$f" "$s/packs/$(basename "$f")"
+  done
+  for f in "$u/new/p"/*; do
+    [ -e "$f" ] || continue
+    b=$(basename "$f")
+    rm -f "$s/packs/$b" "$s/packs/$b.new"
+  done
+  if [ -f "$u/bak/c" ]; then mv "$u/bak/c" "$s/catalog.json"
+  elif [ -f "$u/new/c" ]; then rm -f "$s/catalog.json" "$s/catalog.json.new"
+  fi
+  if [ -f "$u/bak/r" ]; then mv "$u/bak/r" "$r"
+  elif [ -f "$u/new/r" ]; then rm -f "$r" "$r.new"
+  fi
+}
+
+seed_plan() {
+  [ ! -L "$1" ] && { [ ! -e "$1" ] || [ -f "$1" ]; } || return 1
+  if [ -f "$1" ]; then cp "$1" "$2"; else : > "$3"; fi
+}
 
 seed_pack_apply() {
   src=$1
@@ -1522,15 +1518,25 @@ seed_pack_apply() {
     set -- "$stg/p"/*
     [ -f "$1" ] || e='pack has no files'
   fi
+  mkdir -p "$stg/bak/p" "$stg/new/p"
   if [ -z "$e" ]; then
-    if [ -L "$store" ] || [ -L "$store/packs" ] || [ -L "$store/loaded" ] \
-      || [ -L "$store/catalog.json" ] || [ -L "$rec" ]; then
-      e='pack dest is a symlink'
+    if [ -L "$store" ] || [ -L "$store/packs" ] || [ -L "$store/loaded" ]; then
+      e='pack dest is not a regular file'
     fi
     for f in "$stg/p"/*; do
-      [ -f "$f" ] || continue
-      [ -L "$store/packs/$(basename "$f")" ] && e='pack dest is a symlink'
+      [ -z "$e" ] && [ -f "$f" ] || continue
+      b=$(basename "$f")
+      seed_plan "$store/packs/$b" "$stg/bak/p/$b" "$stg/new/p/$b" \
+        || e='pack dest is not a regular file'
     done
+    if [ -z "$e" ] && [ -f "$stg/catalog.json" ]; then
+      seed_plan "$store/catalog.json" "$stg/bak/c" "$stg/new/c" \
+        || e='pack dest is not a regular file'
+    fi
+    if [ -z "$e" ]; then
+      seed_plan "$rec" "$stg/bak/r" "$stg/new/r" \
+        || e='pack dest is not a regular file'
+    fi
   fi
   if [ -n "$e" ]; then
     rm -rf "$stg"
@@ -1538,18 +1544,22 @@ seed_pack_apply() {
     return 69
   fi
   cp "$src" "$stg/r.json"
+  SEED_MV_N=0
+  ok=1
   for f in "$stg/p"/*; do
-    [ -f "$f" ] || continue
-    seed_mv "$f" "$store/packs/$(basename "$f")" || e=1
+    [ "$ok" -eq 1 ] && [ -f "$f" ] || continue
+    seed_mv "$f" "$store/packs/$(basename "$f")" || ok=0
   done
-  if [ -f "$stg/catalog.json" ]; then
-    seed_mv "$stg/catalog.json" "$store/catalog.json" || e=1
-  fi
-  seed_mv "$stg/r.json" "$rec" || e=1
-  rm -rf "$stg"
-  if [ -n "$e" ] || [ ! -s "$rec" ]; then
+  [ "$ok" -eq 1 ] && [ -f "$stg/catalog.json" ] && {
+    seed_mv "$stg/catalog.json" "$store/catalog.json" || ok=0
+  }
+  [ "$ok" -eq 1 ] && { seed_mv "$stg/r.json" "$rec" || ok=0; }
+  if [ "$ok" -ne 1 ] || [ ! -s "$rec" ]; then
+    seed_pack_undo "$stg" "$store" "$rec"
+    rm -rf "$stg"
     printf 'error: pack persist failed\n' >&2; return 70
   fi
+  rm -rf "$stg"
   printf 'loaded: %s\n' "$slug"
 }
 
@@ -1559,7 +1569,7 @@ seed_runtime_ok() {
 }
 
 seed_materialize() {
-  dest=$INSTALL/seed.sh
+  dest=$INSTALL/.seed-runtime.sh
   seed_runtime_ok "$dest" && return 0
   src=${SEED_RUNTIME_URL:-https://seed-agents.com/dl/seed.sh}
   tmp=$dest.tmp
@@ -1576,18 +1586,27 @@ seed_materialize() {
 }
 
 seed_bind_self() {
+  wrap=$INSTALL/seed
+  cache=$INSTALL/.seed-runtime.sh
   rt=
-  if seed_runtime_ok "${SEED_SELF:-}"; then
-    rt=$SEED_SELF
-  elif seed_runtime_ok "$SELF"; then
-    rt=$SELF
+  if seed_runtime_ok "${SEED_SELF:-}"; then rt=$SEED_SELF
+  elif seed_runtime_ok "$SELF"; then rt=$SELF
+  elif seed_runtime_ok "$cache"; then rt=$cache
   else
     seed_materialize
-    rt=$INSTALL/seed.sh
+    rt=$cache
   fi
-  SEED_SELF=$INSTALL/seed
-  printf '#!/bin/sh\nexec /bin/sh "%s" "$@"\n' "$rt" > "$SEED_SELF"
-  chmod +x "$SEED_SELF"
+  if [ "$rt" = "$wrap" ]; then
+    SEED_SELF=$wrap
+    chmod +x "$SEED_SELF" 2>/dev/null || true
+    seed_runtime_ok "$SEED_SELF" || die 'SEED_SELF is not a usable seed runtime' 69
+    return 0
+  fi
+  tmp=$wrap.tmp
+  printf '#!/bin/sh\nexec /bin/sh "%s" "$@"\n' "$rt" > "$tmp"
+  chmod +x "$tmp"
+  mv "$tmp" "$wrap"
+  SEED_SELF=$wrap
   seed_runtime_ok "$rt" && [ -x "$SEED_SELF" ] || die 'SEED_SELF is not a usable seed runtime' 69
 }
 

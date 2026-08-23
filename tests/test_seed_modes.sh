@@ -229,7 +229,7 @@ SEED_MODE=simple SEED_HOME="$t/stdin" SEED_RUNTIME_URL="$SEED" \
   /bin/sh -s -- setup < "$SEED" > "$t/stdin/out" 2> "$t/stdin/err"
 stdin_st=$?
 set -e
-if [ "$stdin_st" -eq 0 ] && [ -x "$t/stdin/seed" ] && [ -f "$t/stdin/seed.sh" ]; then
+if [ "$stdin_st" -eq 0 ] && [ -x "$t/stdin/seed" ] && [ -f "$t/stdin/.seed-runtime.sh" ]; then
   set +e
   printf '%s\n' '{"slug":"fromself","prompt":"ok"}' | SEED_HOME="$t/stdin" \
     "$t/stdin/seed" load - > "$t/stdin/load.out" 2> "$t/stdin/load.err"
@@ -395,6 +395,106 @@ if [ "$wrap_st" -eq 0 ] && [ -x "$t/wrap/seed" ]; then
   fi
 else
   bad 'SEED_SELF wrapper'
+fi
+
+# Mid-commit failure rolls back earlier files and restores old regular files.
+mkdir -p "$t/roll/agent-store/packs" "$t/roll/agent-store/loaded"
+printf 'OLD_A\n' > "$t/roll/agent-store/packs/a.json"
+printf 'OLD_B\n' > "$t/roll/agent-store/packs/b.json"
+printf 'OLD_R\n' > "$t/roll/agent-store/loaded/pair.json"
+export SEED_TEST_FAIL_AT=2
+do_load "$t/roll" '{"slug":"pair","files":{"a.json":{"v":"A"},"b.json":{"v":"B"}}}'
+unset SEED_TEST_FAIL_AT
+if [ "$(cat "$t/roll/load.st")" != 0 ] \
+  && ! grep -q '^loaded:' "$t/roll/load.out" \
+  && grep -qx OLD_A "$t/roll/agent-store/packs/a.json" \
+  && grep -qx OLD_B "$t/roll/agent-store/packs/b.json" \
+  && grep -qx OLD_R "$t/roll/agent-store/loaded/pair.json" \
+  && [ ! -e "$t/roll/agent-store/packs/a.json.new" ] \
+  && [ ! -e "$t/roll/agent-store/packs/b.json.new" ]; then
+  ok 'load - mid-commit rolls back'
+else
+  bad 'load - mid-commit rolls back'
+fi
+
+# New files from a failed commit are removed.
+export SEED_TEST_FAIL_AT=2
+do_load "$t/rollnew" '{"slug":"pair","files":{"a.json":{"v":"A"},"b.json":{"v":"B"}}}'
+unset SEED_TEST_FAIL_AT
+if [ "$(cat "$t/rollnew/load.st")" != 0 ] \
+  && ! grep -q '^loaded:' "$t/rollnew/load.out" \
+  && [ ! -f "$t/rollnew/agent-store/loaded/pair.json" ] \
+  && [ ! -f "$t/rollnew/agent-store/packs/a.json" ] \
+  && [ ! -f "$t/rollnew/agent-store/packs/b.json" ]; then
+  ok 'load - mid-commit drops new files'
+else
+  bad 'load - mid-commit drops new files'
+fi
+
+# Directory dest is refused; no .new leftover.
+mkdir -p "$t/dir/agent-store/packs/z.json" "$t/dir/agent-store/loaded"
+do_load "$t/dir" '{"slug":"z","files":{"z.json":{"prompt":"n"}}}'
+if [ "$(cat "$t/dir/load.st")" != 0 ] \
+  && ! grep -q '^loaded:' "$t/dir/load.out" \
+  && [ ! -f "$t/dir/agent-store/loaded/z.json" ] \
+  && [ ! -e "$t/dir/agent-store/packs/z.json.new" ] \
+  && [ -d "$t/dir/agent-store/packs/z.json" ]; then
+  ok 'load - rejects directory dest'
+else
+  bad 'load - rejects directory dest'
+fi
+
+# Receipt dest is a directory: pack files unchanged, no loaded.
+do_load "$t/recdir" '{"slug":"demo","prompt":"v1"}'
+rm -f "$t/recdir/agent-store/loaded/demo.json"
+mkdir -p "$t/recdir/agent-store/loaded/demo.json"
+do_load "$t/recdir" '{"slug":"demo","prompt":"v2"}'
+if [ "$(cat "$t/recdir/load.st")" != 0 ] \
+  && ! grep -q '^loaded:' "$t/recdir/load.out" \
+  && grep -q '"prompt": "v1"' "$t/recdir/agent-store/packs/demo.json" \
+  && [ -d "$t/recdir/agent-store/loaded/demo.json" ] \
+  && [ ! -e "$t/recdir/agent-store/loaded/demo.json.new" ] \
+  && [ ! -e "$t/recdir/agent-store/packs/demo.json.new" ]; then
+  ok 'load - receipt dir rolls back'
+else
+  bad 'load - receipt dir rolls back'
+fi
+
+# Receipt commit failure after pack write rolls pack back.
+do_load "$t/recfail" '{"slug":"demo","prompt":"v1"}'
+export SEED_TEST_FAIL_AT=2
+do_load "$t/recfail" '{"slug":"demo","prompt":"v2"}'
+unset SEED_TEST_FAIL_AT
+if [ "$(cat "$t/recfail/load.st")" != 0 ] \
+  && ! grep -q '^loaded:' "$t/recfail/load.out" \
+  && grep -q '"prompt": "v1"' "$t/recfail/agent-store/packs/demo.json" \
+  && grep -q 'v1' "$t/recfail/agent-store/loaded/demo.json"; then
+  ok 'load - receipt fail rolls back pack'
+else
+  bad 'load - receipt fail rolls back pack'
+fi
+
+# Running $SEED_HOME/seed (full runtime) must not truncate it.
+mkdir -p "$t/selfhome"
+cp "$SEED" "$t/selfhome/seed"
+chmod 755 "$t/selfhome/seed"
+before_sz=$(wc -c < "$t/selfhome/seed" | tr -d ' ')
+before_sum=$(cksum < "$t/selfhome/seed")
+set +e
+printf '%s\n' '{"slug":"selfok","prompt":"ok"}' | SEED_HOME="$t/selfhome" \
+  "$t/selfhome/seed" load - > "$t/selfhome/out" 2> "$t/selfhome/err"
+selfhome_st=$?
+set -e
+after_sz=$(wc -c < "$t/selfhome/seed" | tr -d ' ')
+after_sum=$(cksum < "$t/selfhome/seed")
+if [ "$selfhome_st" -eq 0 ] \
+  && [ "$before_sz" = "$after_sz" ] \
+  && [ "$before_sum" = "$after_sum" ] \
+  && grep -qx 'loaded: selfok' "$t/selfhome/out" \
+  && [ -s "$t/selfhome/agent-store/loaded/selfok.json" ]; then
+  ok 'SEED_SELF no self-overwrite'
+else
+  bad 'SEED_SELF no self-overwrite'
 fi
 
 [ "$fail" -eq 0 ] || exit 1
