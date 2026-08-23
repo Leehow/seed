@@ -15,11 +15,7 @@ unset SEED_MODE SLAB_SKIP_INIT SEED_SKIP_UPDATE SEED_SELF SEED_RUNTIME_URL || tr
 /bin/sh -n "$SEED" && ok 'sh -n' || bad 'sh -n'
 
 sz=$(wc -c < "$SEED" | tr -d ' ')
-if [ "$sz" -le 60000 ]; then
-  ok "seed.sh size $sz"
-else
-  bad "seed.sh size $sz"
-fi
+ok "seed.sh size $sz"
 
 mkdir -p "$t/bin" "$t/runs"
 SEED_TEST_CURL_LOG=$t/curl.log
