@@ -1982,6 +1982,10 @@ seed_run_task() {
   task=$1
   case $task in
     /ini) seed_install_global; return $? ;;
+    # /help answers from the runtime here for the same reason it does on the
+    # command line: the human is asking what they can type, and sending that
+    # to the model makes it go build a commands table before it can answer.
+    /help) seed_help; return 0 ;;
     /packs|/packs\ *|/pack|/pack\ *) seed_pack_cmd "$task"; return $? ;;
   esac
   evn=$((evn + 1))
