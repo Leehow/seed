@@ -917,6 +917,15 @@ exec_tool() {
       cmd=$(printf '%s' "$args" | jq -r '.command // empty')
       [ -n "$cmd" ] || { printf 'shell: missing command\n' > "$outf"; return 0; }
       tool_note shell "$cmd"
+      # A syntax error inside the worker's eval exits the shell running it,
+      # which ends the session: every later command then waits out the action
+      # timeout for a reply that can never come, and the model, told only
+      # "timeout", sends the same thing again. Parse it first with the shell
+      # that would run it and hand back the error, which says what to fix.
+      syn=$(printf '%s\n' "$cmd" | /bin/sh -n 2>&1) || {
+        printf 'shell: not run, the command does not parse:\n%s\n' "$syn" > "$outf"
+        return 0
+      }
       # Write the file directly. $(cmd | tee) deadlocks in /bin/sh after a timeout.
       shell_run "$session" "$cmd" > "$outf"
       ;;
