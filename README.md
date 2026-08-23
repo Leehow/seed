@@ -69,16 +69,21 @@ Each task container gets only the standalone `seed.sh` plus curl and CA certific
 - Same-model baselines (mini-swe-agent, terminus-2) are queued on the same task set and verifier.
 - Failure analysis is published, not hidden: the three dominant modes are "never submitted", "ran out of time mid-work", and "declared done but failed verification". One notable finding: an earlier `--max-time` on the streaming curl was decapitating long model thinking and mis-charging the failure to the model — now replaced by stall detection.
 
-### An Android tablet builds a 3D game
+### A tablet that codes itself, from the browser
 
-We typed the seed into a stock Android tablet's Termux over adb: it self-healed the missing jq, initialized, and opened its `>` prompt. Then we gave it one task — *"make a 3D web game"* — and the agent on the tablet did the rest unaided:
+We typed the seed into a stock Android tablet's Termux over adb: it self-healed the missing jq, initialized, and opened its `>` prompt. Then we gave it one task — *"make a 3D web game"* — and the agent on the tablet did the rest unaided: a single-file three.js game, served with `nohup python -m http.server 8080`, `curl localhost:8080` checked for 200 **before** the URL was reported, playable by touch.
 
-1. wrote a single-file three.js (CDN) game, **Cube Tap** — tap the spinning cubes, score on hit;
-2. found the local python3, served the game with `nohup python -m http.server 8080`;
-3. verified `curl localhost:8080` returned 200 **before** reporting the URL;
-4. the game opened in the tablet browser, playable by touch.
+Then we asked whether the tablet could drop the terminal entirely. A second prompt block, [`web-ide.json`](plugins/agent/web-ide.json), ships no code at all: it describes an evidence contract and eleven acceptance checks, and the agent grows the console on the machine from that. The design it is held to is deliberately narrow — the shell keeps the loop, the server renders the run feed to HTML, and the page is a view over the evidence a run already writes to disk. Nothing in the console re-implements turns, tool dispatch, or streaming.
 
-No human wrote a line of the game. The runtime that did this is the same single shell file, running on a phone-grade ARM box.
+The console runs on `127.0.0.1` under a Termux wake lock. Into its text box, on the tablet, a human typed one sentence:
+
+> make a 3d game i can play on this tablet
+
+Seventeen rounds later, with no path, no library, no framing, and no instruction to serve or verify anything, the tablet had **3D Speeder**: three files, three lanes, obstacles that accelerate as you survive, on-screen arrows because the prompt said *tablet*, a best score in `localStorage`, and a crash screen. The agent started its own `python -m http.server` and curl-checked all three files for 200 before it answered.
+
+The one-sentence result was better than the detailed prompt that preceded it. Asking for "a single file using three.js with spinning cubes you tap to score" got exactly that and nothing more; the constraint capped the outcome at the asker's imagination. Specify the checks, not the product.
+
+No human wrote a line of either game. The runtime that did this is the same single shell file, running on a phone-grade ARM box.
 
 ### Notarized install and offline contract tests
 
