@@ -5,6 +5,8 @@ set -eu
 umask 077
 
 SELF=$(CDPATH= cd "$(dirname "$0")" && pwd -P)/$(basename "$0")
+SEED_VERSION=1
+SEED_LAUNCH_PATH=${PATH:-}
 AGENT_MAX_ROUNDS=${AGENT_MAX_ROUNDS:-80}
 # Empty no-tool turns are provider glitches, never successful completion.
 # This is retries after the initial bad turn; set to 0 only for diagnostics.
@@ -768,11 +770,7 @@ llm_main() {
   jq -r '.content // empty' "$lw/t.json"
 }
 
-# When prompt_tokens cross 70% of the window: first summarize the
-# unprotected span into one user message (best effort, one small call),
-# then clear old fat tool bodies. Protect SYSTEM. If there are at least
-# two user turns, keep from the second-to-last user; else keep from the
-# second-to-last tool-call assistant.
+# Compact when prompt_tokens cross 70% of the window. Protect SYSTEM.
 agent_compact() {
   ac_msgs=$1
   ac_tok=$2
@@ -856,10 +854,7 @@ agent_compact() {
   fi
 }
 
-# Best-effort summary of the span that is about to be pruned. Prints the
-# summary text on stdout; returns nonzero on any failure so the caller
-# falls back to plain clearing. Runs one small non-streaming call outside
-# the loop, never touches messages itself.
+# Best-effort prune summary; nonzero means the caller should just clear.
 agent_summarize() {
   as_msgs=$1
   as_p=$2
@@ -1031,9 +1026,6 @@ run_loop() {
         break
       fi
     else
-      # No tools only returns control when the model actually supplied a
-      # final answer. Blank (including whitespace-only) turns are provider
-      # glitches; nudge and retry them rather than silently succeeding.
       compact_content=$(printf '%s' "$content" | tr -d '[:space:]')
       if [ -z "$compact_content" ]; then
         empty_tries=$(cat "$evdir/empty-retries" 2>/dev/null || echo 0)
@@ -1130,6 +1122,11 @@ product_system() {
     "${LLM_PROVIDER:-unknown}" \
     "$INSTALL/agent-store/index.json" \
     "$PWD/.agent-memory/index.json"
+  if [ "${SEED_RUN_MODE:-agent}" = simple ]; then
+    printf 'Mode: simple. No Agent Pack. /packs is not available.\n'
+    return 0
+  fi
+  printf 'SEED_SELF=%s\n' "${SEED_SELF:-$SELF}"
   agent_state_lines
   skill_catalog
   agent_run_hooks system
@@ -1202,9 +1199,7 @@ agent_ready() {
   jq -e '.ready == true' "$f" >/dev/null 2>&1
 }
 
-# Model often writes a useful tree with the wrong shape (skills at the
-# top level, missing version/ours). Salvage contract branches; do not
-# invent a system object if the model deleted it.
+# Salvage a useful but misshapen Machine index; do not invent .system.
 agent_repair_machine_tree() {
   f=$INSTALL/agent-store/index.json
   pack=$INSTALL/agent-store/packs/init.json
@@ -1357,9 +1352,7 @@ agent_fetch_required() {
   agent_fetch_pack 1 "$index"
 }
 
-# agent_update dies on a bad fetch (agent_pack_get). A ready machine must
-# still start with no network, so run it in a subshell: the die exits only
-# the child and a failed refresh is a skipped refresh, never a failed launch.
+# agent_update dies on fetch; a subshell keeps a ready machine offline-startable.
 agent_try_update() {
   [ "${SEED_SKIP_UPDATE:-}" = 1 ] && return 0
   [ -f "$INSTALL/agent-store/catalog.json" ] || return 0
@@ -1457,12 +1450,7 @@ agent_ensure_init() {
   [ "${SLAB_SKIP_INIT:-}" = 1 ] && return 0
   agent_repair_machine_tree || true
   if agent_check_machine_tree; then
-    # A ready machine never re-ran init, so without this the catalog stayed
-    # frozen at whatever version first installed it and a newly published
-    # optional pack could never reach an existing install.
     agent_try_update
-    # Engine owns system.tools. Re-probe every ready launch so a model
-    # overwrite or a later apt install cannot leave stale false slots.
     agent_probe_tools
     agent_discard_baseline
     agent_run_hooks after_ready
@@ -1530,33 +1518,17 @@ agent_update() {
 }
 
 # Standalone seed entry. The shared engine above remains the only agent loop.
-SEED_VERSION=1
-SELF=$(CDPATH= cd "$(dirname "$0")" && pwd -P)/$(basename "$0")
-LAUNCH_CWD=$(pwd -P)
-# Freeze the caller-visible command search path before ensure_jq may add a
-# private runtime dependency directory. /ini success is judged against this.
-SEED_LAUNCH_PATH=${PATH:-}
-AGENT_MAX_ROUNDS=${AGENT_MAX_ROUNDS:-80}
-ACTION_TIMEOUT=${SEED_ACTION_TIMEOUT:-180}
-MAX_OBS_BYTES=${SEED_MAX_OBS_BYTES:-16384}
-HTTP_TIMEOUT=${SEED_HTTP_TIMEOUT:-300}
-HTTP_STALL=${SEED_HTTP_STALL:-300}
-
 seed_usage() {
   printf 'usage: sh seed.sh <channel|api-url> <API_KEY> [model]\n' >&2
+  printf '       sh seed.sh setup\n' >&2
   printf '       sh seed.sh load <file|-|url>\n' >&2
 }
 
 seed_help() {
   printf '%s\n' \
-    'seed: enter an ordinary task to let the agent work in the launch directory.' \
-    '/help                 show this help without calling the model' \
-    '/ini                  ask the agent to install the global command seed, then verify it' \
-    '/packs                list published packs (slug + description)' \
-    '/packs install <slug> install a published pack by slug' \
-    '/pack <slug>          alias for /packs install <slug>' \
-    'sh seed.sh load -     load a pack JSON from stdin (curl ... | sh seed.sh load -)' \
-    'sh seed.sh load <f>   load a pack JSON from a file or URL'
+    'seed: type a task to work in the launch directory.' \
+    '/ini  install the global command seed' \
+    'sh seed.sh setup | load -'
 }
 
 seed_state_root() {
@@ -1568,37 +1540,18 @@ seed_state_root() {
   fi
 }
 
-packs_index_url() {
-  printf '%s' "${SEED_PACKS_INDEX:-https://seed-agents.com/dl/packs.json}"
-}
-
-packs_bundle_url() {
-  printf '%s/%s.json' "${SEED_PACKS_DL:-https://seed-agents.com/dl/packs}" "$1"
-}
-
-seed_pack_slug_ok() {
-  case $1 in
-    ''|*[!a-zA-Z0-9_-]*|-*|_*) return 1 ;;
-  esac
-  return 0
-}
-
-# Write a website bundle or a single prompt JSON into agent-store.
 seed_pack_apply() {
   src=$1
   need jq
-  if ! jq -e 'type == "object"' "$src" >/dev/null 2>&1; then
-    printf 'error: pack is not JSON\n' >&2
-    return 69
-  fi
+  jq -e 'type == "object"' "$src" >/dev/null 2>&1 || {
+    printf 'error: pack is not JSON\n' >&2; return 69
+  }
   slug=$(jq -r '.slug // empty' "$src")
-  if [ -z "$slug" ] && jq -e 'has("prompt")' "$src" >/dev/null 2>&1; then
-    slug=pack
-  fi
-  if ! seed_pack_slug_ok "$slug"; then
-    printf 'error: pack has no usable slug\n' >&2
-    return 69
-  fi
+  if [ -z "$slug" ] && jq -e 'has("prompt")' "$src" >/dev/null 2>&1; then slug=pack; fi
+  case $slug in
+    ''|*[!a-zA-Z0-9_-]*|-*|_*)
+      printf 'error: pack has no usable slug\n' >&2; return 69 ;;
+  esac
   store=$INSTALL/agent-store
   mkdir -p "$store/packs" "$store/loaded"
   if jq -e '.files | type == "object"' "$src" >/dev/null 2>&1; then
@@ -1607,9 +1560,7 @@ seed_pack_apply() {
     while [ "$i" -lt "$n" ]; do
       name=$(jq -r --argjson i "$i" '.files | keys[$i]' "$src")
       i=$((i + 1))
-      case $name in
-        ''|*..*|/*|*/*) continue ;;
-      esac
+      case $name in ''|*..*|/*|*/*) continue ;; esac
       jq --arg n "$name" '.files[$n]' "$src" > "$store/packs/$name"
     done
     if jq -e '.files["init.json"] | type == "object" and has("machine_tree")' \
@@ -1623,195 +1574,104 @@ seed_pack_apply() {
   else
     jq '.' "$src" > "$store/packs/$slug.json"
   fi
-  cp "$src" "$store/loaded/$slug.json"
+  tmp=$store/loaded/$slug.json.tmp
+  cp "$src" "$tmp" && mv "$tmp" "$store/loaded/$slug.json"
+  [ -s "$store/loaded/$slug.json" ] || {
+    printf 'error: pack persist failed\n' >&2; return 70
+  }
   printf 'loaded: %s\n' "$slug"
-}
-
-seed_packs_list() {
-  need curl
-  need jq
-  url=$(packs_index_url)
-  body=$(mktemp "${TMPDIR:-/tmp}/seed-packs.XXXXXX")
-  if ! http_get "$url" "$body"; then
-    if [ "${HTTP_CURL:-1}" -ne 0 ]; then
-      printf 'error: packs catalog: network failed (curl=%s)\n' "$HTTP_CURL" >&2
-    else
-      printf 'error: packs catalog: HTTP %s from %s\n' "$HTTP_CODE" "$url" >&2
-    fi
-    rm -f "$body"
-    return 71
-  fi
-  if ! jq -e '.packs | type == "array"' "$body" >/dev/null 2>&1; then
-    printf 'error: packs catalog: unexpected JSON from %s\n' "$url" >&2
-    rm -f "$body"
-    return 69
-  fi
-  if [ "$(jq '.packs | length' "$body")" -eq 0 ]; then
-    printf 'packs: none published\n'
-    rm -f "$body"
-    return 0
-  fi
-  if ! jq -r '.packs[] |
-      (.slug // "?") as $s |
-      (.description // .name // "") as $d |
-      if $d == "" then $s else "\($s)  \($d)" end' "$body"; then
-    printf 'error: packs catalog: unexpected JSON from %s\n' "$url" >&2
-    rm -f "$body"
-    return 69
-  fi
-  rm -f "$body"
-}
-
-seed_packs_install() {
-  slug=$1
-  if ! seed_pack_slug_ok "$slug"; then
-    printf 'error: invalid pack name: %s\n' "$slug" >&2
-    return 64
-  fi
-  need curl
-  need jq
-  url=$(packs_bundle_url "$slug")
-  body=$(mktemp "${TMPDIR:-/tmp}/seed-pinst.XXXXXX")
-  if ! http_get "$url" "$body"; then
-    if [ "${HTTP_CURL:-1}" -ne 0 ]; then
-      printf 'error: pack %s: network failed (curl=%s)\n' "$slug" "$HTTP_CURL" >&2
-    else
-      printf 'error: pack %s: HTTP %s from %s\n' "$slug" "$HTTP_CODE" "$url" >&2
-    fi
-    rm -f "$body"
-    return 71
-  fi
-  st=0
-  seed_pack_apply "$body" || st=$?
-  rm -f "$body"
-  return "$st"
-}
-
-seed_handle_packs() {
-  cmd=$1
-  case $cmd in
-    /packs)
-      seed_packs_list
-      return $?
-      ;;
-    /packs\ install|/packs\ install\ )
-      printf 'error: usage: /packs install <slug>\n' >&2
-      return 64
-      ;;
-    /packs\ install\ *)
-      slug=${cmd#/packs install }
-      while [ "$slug" != "${slug# }" ]; do slug=${slug# }; done
-      while [ "$slug" != "${slug% }" ]; do slug=${slug% }; done
-      if [ -z "$slug" ]; then
-        printf 'error: usage: /packs install <slug>\n' >&2
-        return 64
-      fi
-      seed_packs_install "$slug"
-      return $?
-      ;;
-    *)
-      printf 'error: usage: /packs | /packs install <slug>\n' >&2
-      return 64
-      ;;
-  esac
-}
-
-seed_handle_pack() {
-  cmd=$1
-  case $cmd in
-    /pack|/pack\ )
-      printf 'error: usage: /pack <name>\n' >&2
-      return 64
-      ;;
-    /pack\ *)
-      slug=${cmd#/pack }
-      while [ "$slug" != "${slug# }" ]; do slug=${slug# }; done
-      while [ "$slug" != "${slug% }" ]; do slug=${slug% }; done
-      if [ -z "$slug" ]; then
-        printf 'error: usage: /pack <name>\n' >&2
-        return 64
-      fi
-      seed_packs_install "$slug"
-      return $?
-      ;;
-    *)
-      printf 'error: usage: /pack <name>\n' >&2
-      return 64
-      ;;
-  esac
 }
 
 seed_prepare_state() {
   state=$(seed_state_root)
   mkdir -p "$state"
   INSTALL=$(CDPATH= cd "$state" && pwd -P)
-  export SEED_HOME=$INSTALL
+  SEED_SELF=${SEED_SELF:-$SELF}
+  if [ ! -x "$SEED_SELF" ]; then
+    SEED_SELF=$INSTALL/seed
+    printf '#!/bin/sh\nexec /bin/sh "%s" "$@"\n' "$SELF" > "$SEED_SELF"
+    chmod +x "$SEED_SELF"
+  fi
+  export SEED_HOME=$INSTALL SEED_SELF
+}
+
+seed_ask_mode() {
+  printf '%s\n' \
+    'Choose your experience:' \
+    '1) Agent (recommended) - official Agent Pack, then /packs /help' \
+    '2) Simple - base loop only (shell + edit), no Agent Pack' >&2
+  while :; do
+    printf 'Choice [1]: ' >&2
+    ans=
+    if [ -t 0 ] || [ "${1:-}" = setup ]; then
+      IFS= read -r ans || ans=
+    elif [ -r /dev/tty ]; then
+      IFS= read -r ans </dev/tty || ans=
+    else
+      printf 'agent\n'; return 0
+    fi
+    case $ans in
+      ''|1|agent) printf 'agent\n'; return 0 ;;
+      2|simple) printf 'simple\n'; return 0 ;;
+    esac
+    printf 'error: enter 1 or 2\n' >&2
+  done
+}
+
+seed_resolve_mode() {
+  ask=${1:-}
+  mf=$INSTALL/agent-store/mode
+  m=${SEED_MODE:-}
+  case $m in agent|simple)
+    SEED_RUN_MODE=$m
+    if [ "$ask" = setup ] || [ ! -f "$mf" ]; then
+      mkdir -p "$INSTALL/agent-store"
+      printf '%s\n' "$m" > "$mf"
+    fi
+    export SEED_RUN_MODE
+    [ "$ask" = setup ] && printf 'mode: %s\n' "$m"
+    return 0
+  esac
+  if [ "$ask" != setup ] && [ -f "$mf" ]; then
+    IFS= read -r m < "$mf" || m=
+    case $m in agent|simple)
+      SEED_RUN_MODE=$m; export SEED_RUN_MODE; return 0 ;;
+    esac
+  fi
+  SEED_RUN_MODE=$(seed_ask_mode "$ask")
+  mkdir -p "$INSTALL/agent-store"
+  printf '%s\n' "$SEED_RUN_MODE" > "$mf"
+  export SEED_RUN_MODE
+  printf 'mode: %s\n' "$SEED_RUN_MODE"
 }
 
 seed_load_main() {
-  if [ $# -ne 1 ]; then
-    printf 'usage: sh seed.sh load <file|-|url>\n' >&2
-    exit 64
-  fi
+  [ $# -eq 1 ] || { printf 'usage: sh seed.sh load <file|-|url>\n' >&2; exit 64; }
   src=$1
   seed_prepare_state
   ensure_jq
   body=$(mktemp "${TMPDIR:-/tmp}/seed-load.XXXXXX")
   if [ "$src" = - ]; then
-    if ! cat > "$body"; then
-      rm -f "$body"
-      die 'pack: failed to read stdin' 74
-    fi
+    cat > "$body" || { rm -f "$body"; die 'pack: failed to read stdin' 74; }
   elif [ -f "$src" ]; then
     cat "$src" > "$body"
   else
     case $src in
       http://*|https://*)
         need curl
-        if ! http_get "$src" "$body"; then
-          if [ "${HTTP_CURL:-1}" -ne 0 ]; then
-            rm -f "$body"
-            die "pack: network failed (curl=$HTTP_CURL)" 71
-          fi
-          rm -f "$body"
+        http_get "$src" "$body" || {
+          c=${HTTP_CURL:-1}; rm -f "$body"
+          [ "$c" -ne 0 ] && die "pack: network failed (curl=$c)" 71
           die "pack: HTTP $HTTP_CODE from $src" 71
-        fi ;;
-      *)
-        rm -f "$body"
-        die "pack: not a file or URL: $src" 64 ;;
+        } ;;
+      *) rm -f "$body"; die "pack: not a file or URL: $src" 64 ;;
     esac
   fi
-  if [ ! -s "$body" ]; then
-    rm -f "$body"
-    die 'pack: empty input' 69
-  fi
+  [ -s "$body" ] || { rm -f "$body"; die 'pack: empty input' 69; }
   st=0
   seed_pack_apply "$body" || st=$?
   rm -f "$body"
   [ "$st" -eq 0 ] || exit "$st"
-}
-
-seed_cli_slash() {
-  cmd=$1
-  shift
-  for a in "$@"; do
-    cmd="$cmd $a"
-  done
-  case $cmd in
-    /help)
-      seed_help
-      return 0 ;;
-    /packs|/packs\ *)
-      seed_prepare_state
-      seed_handle_packs "$cmd"
-      return $? ;;
-    /pack|/pack\ *)
-      seed_prepare_state
-      seed_handle_pack "$cmd"
-      return $? ;;
-    *)
-      return 1 ;;
-  esac
 }
 
 seed_probe() {
@@ -1949,10 +1809,7 @@ seed_install_global() {
 seed_run_task() {
   task=$1
   case $task in
-    /help) seed_help; return 0 ;;
     /ini) seed_install_global; return $? ;;
-    /packs|/packs\ *) seed_handle_packs "$task"; return $? ;;
-    /pack|/pack\ *) seed_handle_pack "$task"; return $? ;;
   esac
   evn=$((evn + 1))
   ev=${AGENT_RUNS_DIR:-$PWD/.agent-runs}/$(date -u +%Y%m%dT%H%M%SZ)-$$-$evn
@@ -1979,12 +1836,10 @@ seed_main() {
     task=$*
     set --
   fi
-  state=$(seed_state_root)
-  mkdir -p "$state"
-  INSTALL=$(CDPATH= cd "$state" && pwd -P)
-  export SEED_HOME=$INSTALL
+  seed_prepare_state
   seed_load_or_activate "$@"
-  agent_ensure_init
+  seed_resolve_mode
+  [ "$SEED_RUN_MODE" = simple ] || agent_ensure_init
   SEED_STREAM=1
   SEED_STREAM_PRINT=0
   export SEED_STREAM SEED_STREAM_PRINT
@@ -2018,9 +1873,13 @@ case ${1:-} in
     shift
     seed_load_main "$@"
     exit $? ;;
-  /help|/packs|/pack)
-    seed_cli_slash "$@"
+  setup)
+    seed_prepare_state
+    seed_resolve_mode setup
     exit $? ;;
+  /help)
+    seed_help
+    exit 0 ;;
   --oneshot|-p)
     # One-shot operation uses the existing saved activation.
     seed_main "$@"
