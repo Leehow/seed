@@ -1535,13 +1535,19 @@ HTTP_STALL=${SEED_HTTP_STALL:-300}
 
 seed_usage() {
   printf 'usage: sh seed.sh <channel|api-url> <API_KEY> [model]\n' >&2
+  printf '       sh seed.sh load <file|-|url>\n' >&2
 }
 
 seed_help() {
   printf '%s\n' \
     'seed: enter an ordinary task to let the agent work in the launch directory.' \
-    '/help  show this help without calling the model' \
-    '/ini   ask the agent to install the global command seed, then verify it'
+    '/help                 show this help without calling the model' \
+    '/ini                  ask the agent to install the global command seed, then verify it' \
+    '/packs                list published packs (slug + description)' \
+    '/packs install <slug> install a published pack by slug' \
+    '/pack <slug>          alias for /packs install <slug>' \
+    'sh seed.sh load -     load a pack JSON from stdin (curl ... | sh seed.sh load -)' \
+    'sh seed.sh load <f>   load a pack JSON from a file or URL'
 }
 
 seed_state_root() {
@@ -1551,6 +1557,252 @@ seed_state_root() {
     [ -n "${HOME:-}" ] || die 'HOME is unset; set SEED_HOME' 64
     printf '%s/.seed\n' "$HOME"
   fi
+}
+
+packs_index_url() {
+  printf '%s' "${SEED_PACKS_INDEX:-https://seed-agents.com/dl/packs.json}"
+}
+
+packs_bundle_url() {
+  printf '%s/%s.json' "${SEED_PACKS_DL:-https://seed-agents.com/dl/packs}" "$1"
+}
+
+seed_pack_slug_ok() {
+  case $1 in
+    ''|*[!a-zA-Z0-9_-]*|-*|_*) return 1 ;;
+  esac
+  return 0
+}
+
+# Write a website bundle or a single prompt JSON into agent-store.
+seed_pack_apply() {
+  src=$1
+  need jq
+  if ! jq -e 'type == "object"' "$src" >/dev/null 2>&1; then
+    printf 'error: pack is not JSON\n' >&2
+    return 69
+  fi
+  slug=$(jq -r '.slug // empty' "$src")
+  if [ -z "$slug" ] && jq -e 'has("prompt")' "$src" >/dev/null 2>&1; then
+    slug=pack
+  fi
+  if ! seed_pack_slug_ok "$slug"; then
+    printf 'error: pack has no usable slug\n' >&2
+    return 69
+  fi
+  store=$INSTALL/agent-store
+  mkdir -p "$store/packs" "$store/loaded"
+  if jq -e '.files | type == "object"' "$src" >/dev/null 2>&1; then
+    n=$(jq '.files | keys | length' "$src")
+    i=0
+    while [ "$i" -lt "$n" ]; do
+      name=$(jq -r --argjson i "$i" '.files | keys[$i]' "$src")
+      i=$((i + 1))
+      case $name in
+        ''|*..*|/*|*/*) continue ;;
+      esac
+      jq --arg n "$name" '.files[$n]' "$src" > "$store/packs/$name"
+    done
+    if jq -e '.files["init.json"] | type == "object" and has("machine_tree")' \
+        "$src" >/dev/null 2>&1; then
+      if jq -e '.index | type == "object"' "$src" >/dev/null 2>&1; then
+        jq '.index' "$src" > "$store/catalog.json"
+      elif jq -e '.files["index.json"] | type == "object"' "$src" >/dev/null 2>&1; then
+        jq '.files["index.json"]' "$src" > "$store/catalog.json"
+      fi
+    fi
+  else
+    jq '.' "$src" > "$store/packs/$slug.json"
+  fi
+  cp "$src" "$store/loaded/$slug.json"
+  printf 'loaded: %s\n' "$slug"
+}
+
+seed_packs_list() {
+  need curl
+  need jq
+  url=$(packs_index_url)
+  body=$(mktemp "${TMPDIR:-/tmp}/seed-packs.XXXXXX")
+  if ! http_get "$url" "$body"; then
+    if [ "${HTTP_CURL:-1}" -ne 0 ]; then
+      printf 'error: packs catalog: network failed (curl=%s)\n' "$HTTP_CURL" >&2
+    else
+      printf 'error: packs catalog: HTTP %s from %s\n' "$HTTP_CODE" "$url" >&2
+    fi
+    rm -f "$body"
+    return 71
+  fi
+  if ! jq -e '.packs | type == "array"' "$body" >/dev/null 2>&1; then
+    printf 'error: packs catalog: unexpected JSON from %s\n' "$url" >&2
+    rm -f "$body"
+    return 69
+  fi
+  if [ "$(jq '.packs | length' "$body")" -eq 0 ]; then
+    printf 'packs: none published\n'
+    rm -f "$body"
+    return 0
+  fi
+  if ! jq -r '.packs[] |
+      (.slug // "?") as $s |
+      (.description // .name // "") as $d |
+      if $d == "" then $s else "\($s)  \($d)" end' "$body"; then
+    printf 'error: packs catalog: unexpected JSON from %s\n' "$url" >&2
+    rm -f "$body"
+    return 69
+  fi
+  rm -f "$body"
+}
+
+seed_packs_install() {
+  slug=$1
+  if ! seed_pack_slug_ok "$slug"; then
+    printf 'error: invalid pack name: %s\n' "$slug" >&2
+    return 64
+  fi
+  need curl
+  need jq
+  url=$(packs_bundle_url "$slug")
+  body=$(mktemp "${TMPDIR:-/tmp}/seed-pinst.XXXXXX")
+  if ! http_get "$url" "$body"; then
+    if [ "${HTTP_CURL:-1}" -ne 0 ]; then
+      printf 'error: pack %s: network failed (curl=%s)\n' "$slug" "$HTTP_CURL" >&2
+    else
+      printf 'error: pack %s: HTTP %s from %s\n' "$slug" "$HTTP_CODE" "$url" >&2
+    fi
+    rm -f "$body"
+    return 71
+  fi
+  st=0
+  seed_pack_apply "$body" || st=$?
+  rm -f "$body"
+  return "$st"
+}
+
+seed_handle_packs() {
+  cmd=$1
+  case $cmd in
+    /packs)
+      seed_packs_list
+      return $?
+      ;;
+    /packs\ install|/packs\ install\ )
+      printf 'error: usage: /packs install <slug>\n' >&2
+      return 64
+      ;;
+    /packs\ install\ *)
+      slug=${cmd#/packs install }
+      while [ "$slug" != "${slug# }" ]; do slug=${slug# }; done
+      while [ "$slug" != "${slug% }" ]; do slug=${slug% }; done
+      if [ -z "$slug" ]; then
+        printf 'error: usage: /packs install <slug>\n' >&2
+        return 64
+      fi
+      seed_packs_install "$slug"
+      return $?
+      ;;
+    *)
+      printf 'error: usage: /packs | /packs install <slug>\n' >&2
+      return 64
+      ;;
+  esac
+}
+
+seed_handle_pack() {
+  cmd=$1
+  case $cmd in
+    /pack|/pack\ )
+      printf 'error: usage: /pack <name>\n' >&2
+      return 64
+      ;;
+    /pack\ *)
+      slug=${cmd#/pack }
+      while [ "$slug" != "${slug# }" ]; do slug=${slug# }; done
+      while [ "$slug" != "${slug% }" ]; do slug=${slug% }; done
+      if [ -z "$slug" ]; then
+        printf 'error: usage: /pack <name>\n' >&2
+        return 64
+      fi
+      seed_packs_install "$slug"
+      return $?
+      ;;
+    *)
+      printf 'error: usage: /pack <name>\n' >&2
+      return 64
+      ;;
+  esac
+}
+
+seed_prepare_state() {
+  state=$(seed_state_root)
+  mkdir -p "$state"
+  INSTALL=$(CDPATH= cd "$state" && pwd -P)
+  export SEED_HOME=$INSTALL
+}
+
+seed_load_main() {
+  if [ $# -ne 1 ]; then
+    printf 'usage: sh seed.sh load <file|-|url>\n' >&2
+    exit 64
+  fi
+  src=$1
+  seed_prepare_state
+  ensure_jq
+  body=$(mktemp "${TMPDIR:-/tmp}/seed-load.XXXXXX")
+  if [ "$src" = - ]; then
+    if ! cat > "$body"; then
+      rm -f "$body"
+      die 'pack: failed to read stdin' 74
+    fi
+  elif [ -f "$src" ]; then
+    cat "$src" > "$body"
+  else
+    case $src in
+      http://*|https://*)
+        need curl
+        if ! http_get "$src" "$body"; then
+          if [ "${HTTP_CURL:-1}" -ne 0 ]; then
+            rm -f "$body"
+            die "pack: network failed (curl=$HTTP_CURL)" 71
+          fi
+          rm -f "$body"
+          die "pack: HTTP $HTTP_CODE from $src" 71
+        fi ;;
+      *)
+        rm -f "$body"
+        die "pack: not a file or URL: $src" 64 ;;
+    esac
+  fi
+  if [ ! -s "$body" ]; then
+    rm -f "$body"
+    die 'pack: empty input' 69
+  fi
+  st=0
+  seed_pack_apply "$body" || st=$?
+  rm -f "$body"
+  [ "$st" -eq 0 ] || exit "$st"
+}
+
+seed_cli_slash() {
+  cmd=$1
+  shift
+  for a in "$@"; do
+    cmd="$cmd $a"
+  done
+  case $cmd in
+    /help)
+      seed_help
+      return 0 ;;
+    /packs|/packs\ *)
+      seed_prepare_state
+      seed_handle_packs "$cmd"
+      return $? ;;
+    /pack|/pack\ *)
+      seed_prepare_state
+      seed_handle_pack "$cmd"
+      return $? ;;
+    *)
+      return 1 ;;
+  esac
 }
 
 seed_probe() {
@@ -1690,6 +1942,8 @@ seed_run_task() {
   case $task in
     /help) seed_help; return 0 ;;
     /ini) seed_install_global; return $? ;;
+    /packs|/packs\ *) seed_handle_packs "$task"; return $? ;;
+    /pack|/pack\ *) seed_handle_pack "$task"; return $? ;;
   esac
   evn=$((evn + 1))
   ev=${AGENT_RUNS_DIR:-$PWD/.agent-runs}/$(date -u +%Y%m%dT%H%M%SZ)-$$-$evn
@@ -1751,6 +2005,13 @@ seed_main() {
 
 case ${1:-} in
   --probe) seed_probe; exit 0 ;;
+  load)
+    shift
+    seed_load_main "$@"
+    exit $? ;;
+  /help|/packs|/pack)
+    seed_cli_slash "$@"
+    exit $? ;;
   --oneshot|-p)
     # One-shot operation uses the existing saved activation.
     seed_main "$@"
