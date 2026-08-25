@@ -50,6 +50,7 @@ cd 你的项目
 - 四层：**L0 规则**（`rules.md`，永远最高优先）→ **L1 事实**（项目 notes/facts 加机器索引）→ **L2 经验**（按 id 一目录、带生命周期）→ **L3 证据**（只追加的 `runs/*.jsonl`）。
 - 经验有生命周期：`candidate → active → degraded → quarantined / stale / retired`；retired 归档进 attic，不删除。
 - 模型只有**提案权**。`/maintain` 和 `--maintain` 是不调用模型的离线 runtime 命令：kernel 只规范化无歧义的 SKILL 元数据（包括补上完全缺失的 frontmatter）、store-relative catalog/evidence 写法和启动路径写法，再从启动目录为每条非空、非 no-op 的 `verify[]` 启动全新 shell 并写入自己的精确收据；已有但无效的 frontmatter 和任何不受 containment 约束的路径仍会被拒绝。只有 16 字段 schema、时间、路径 containment、规范 SKILL frontmatter、同步 catalog 行和 runtime evidence 全部一致才发布。
+- **不透明标识归 runtime 所有。** 模型只给语义实体取稳定、可读的 slug。UUID、内容哈希、run/receipt ID 和临时名称全部由 runtime 生成、持久化、关联和核验；Seed 不要求模型发明、抄写或往返传递随机 ID。
 - 检索只有一个 runtime 漏斗：OS/工具 scope → active 或带警告的 degraded → 英文关键词打分 → 确定性排序 → 最多 3 条 metadata。命中才加载 `SKILL.md`；模型不得扫描 experience index 另造激活通道。
 - 经验即 skill：通过校验的 active/degraded 经验在每个任务后合并进 `agent.skills`。能力变成 `ok:false` 时，依赖它的经验立即不可用，maintenance 再将其转成 `stale`。memory prompt 缺失时由 runtime 按 catalog 获取；自动 pack 更新仍须显式设置 `SEED_AUTO_UPDATE=1`。
 

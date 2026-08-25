@@ -36,6 +36,7 @@ Supporting decisions:
 - **Multi-agent = Unix process tree.** A subagent is `seed --oneshot '<self-contained task>'` started from the persistent shell, exactly as `delegate.json` describes. No Python MultiAgentOrchestrator, no scheduler process. `SEED_PARENT_RUN_ID` and `SEED_RUN_ROLE` carry provenance into evidence under `.agent-runs/`.
 - **Console is a view, not a loop.** Any future Seed Console UI reads the run evidence already written to `.agent-runs/`. It never re-implements turns, tool dispatch, or streaming, and it is not a Web IDE — the web-ide pack already holds the line: the shell keeps the loop, the page renders evidence.
 - **Sandbox is a capability.** docker/podman/bwrap are Machine index entries like any other CLI. A pack may instruct "prefer sandboxed execution for this class of task"; Docker is never a hard requirement of the kernel.
+- **Opaque identifiers belong to the runtime.** Models are good at semantic, stable names and poor at exact round-trips of UUIDs, hashes, receipts, and other random identifiers. A model may propose a readable slug; the kernel generates, stores, correlates, and verifies every opaque identifier. No protocol may depend on the model reproducing one exactly.
 
 Explicitly not doing:
 
