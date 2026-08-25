@@ -5,7 +5,7 @@ set -eu
 umask 077
 
 SELF=$(CDPATH= cd "$(dirname "$0")" && pwd -P)/$(basename "$0")
-SEED_VERSION=1
+SEED_VERSION=2
 SEED_LAUNCH_PATH=${PATH:-}
 AGENT_MAX_ROUNDS=${AGENT_MAX_ROUNDS:-80}
 SEED_EMPTY_RETRIES=${SEED_EMPTY_RETRIES:-3}
@@ -382,6 +382,7 @@ cabin_agent_system() {
 Before acting, read the Machine index with shell (jq, not cat of the whole file) and follow system.retrieve.
 The index is a helper catalog, not the problem. jq it for ok matches; do not rewrite the human's ask into index key names.
 When the human asks about skills or SKILL.md, open https://agentskills.io/specification with shell first.
+For a matching skill location, read that file; for a legacy location that is a directory, read its SKILL.md.
 When the human's message starts with /, it is a slash command, not a coding task: follow system.retrieve and build the commands pack first if the table is missing.
 When the human asks what tools you have, what you can use, or what was indexed: first jq the Machine index. Then list (1) the two API tools shell and edit, (2) every ok entry that system.retrieve tells you to use. Mention present-but-not-ok items separately. Do not answer with only shell and edit. Do not dump the raw index.
 EOF
@@ -453,6 +454,10 @@ while [ -f "$SESSION/alive" ]; do
   fi
   cmd=$($CAT "$SESSION/request")
   $RM -f "$SESSION/request" "$SESSION/done"
+  # Per-run provenance env: the worker snapshots this process env at spawn
+  # time, so live exports alone never reach commands of runs that start
+  # later. run_provenance writes this file; re-source it before every command.
+  if [ -f "$SESSION/run-env" ]; then . "$SESSION/run-env"; fi
   eval "$cmd" > "$SESSION/stdout" 2> "$SESSION/stderr"
   echo $? > "$SESSION/status"
   pwd > "$SESSION/cwd"
@@ -1053,25 +1058,58 @@ product_root() {
 }
 
 skill_catalog() {
+  sc_task=${1:-}
   scf=$INSTALL/agent-store/index.json
   [ -f "$scf" ] || return 0
-  jq -r '
+  jq -r --arg task "$sc_task" '
     def esc: gsub("&";"&amp;") | gsub("<";"&lt;") | gsub(">";"&gt;");
-    (.system.skills // [])
-    | map(select(.ok == true and ((.name // "") | length) > 0))
+    def tokens:
+      ($task | ascii_downcase | gsub("[^a-z0-9]+"; " ") | split(" ")
+       | map(select(length >= 2))
+       | map(select(. as $w
+           | ["a","an","the","and","or","of","to","in","on","for","with",
+              "by","is","it","this","that","from","as","at","be","if","via",
+              "vs","using","use"] | index($w) | not)));
+    . as $root
+    | tokens as $tokens
+    | (.agent.skills // .system.skills // [])
+    | map(select(.ok == true and ((.name // "") | length) > 0)) as $all
+    | ($all | map(select((.source // "") != "experience"))) as $ordinary
+    | ($all
+       | map(select((.source // "") == "experience"))
+       | map(. as $s
+           | (($s.scope.os // []) | map(ascii_downcase)) as $os
+           | ($s.scope.tools // []) as $tools
+           | ([($s.description // ""), ($s.applies_if[]? // "")]
+              | map(ascii_downcase)) as $fields
+           | ([ $tokens[] as $tok
+                | $fields[] as $field
+                | select($field | contains($tok)) ] | length) as $score
+           | select(($s.status == "active" or $s.status == "degraded")
+               and (($os | length) == 0 or ($os | index(($root.identity.os // "") | ascii_downcase)) != null)
+               and ($tools | all(. as $tool
+                    | any($root.capabilities[]?; .name == $tool and .ok == true)))
+               and $score > 0)
+           | . + {__score:$score})
+       | sort_by(-.__score, .name)
+       | .[:3]
+       | map(del(.__score))) as $experiences
+    | ($ordinary + $experiences)
     | if length == 0 then empty
       else
         (["",
           "The following skills provide specialized instructions for specific tasks.",
-          "Load a skill file with shell (cat that path) when the task matches its description.",
+          "Load a matching skill location with shell; if it is a legacy directory, read its SKILL.md.",
           "<available_skills>"]
-        + [ .[] |
-            "  <skill>",
-            "    <name>" + (.name | esc) + "</name>",
-            "    <description>" + ((.description // "" | gsub("\n";" ") | esc)) + "</description>",
-            "    <location>" + ((.path // "") | esc) + "</location>",
-            "  </skill>"
-          ]
+        + [ .[]
+            | ["  <skill>",
+               "    <name>" + (.name | esc) + "</name>",
+               "    <description>" + ((.description // "" | gsub("\n";" ") | esc)) + "</description>"]
+              + (if (.source // "") == "experience"
+                 then ["    <status>" + (.status | esc) + "</status>"] else [] end)
+              + ["    <location>" + ((.path // "") | esc) + "</location>",
+                 "  </skill>"]
+          ] | flatten
         + ["</available_skills>"])
         | join("\n")
       end
@@ -1082,8 +1120,13 @@ agent_state_lines() {
   sf=$INSTALL/agent-store/index.json
   [ -f "$sf" ] || return 0
   jq -r '
-    "Tools ok: " + ([.system.tools // {} | to_entries[]
-      | select(.value.ok == true) | .key] | join(" ")),
+    ([.capabilities[]? | select(.ok == true) | .name]) as $cap
+    | ("Capabilities ok: " + (if ($cap | length) == 0 then "none yet"
+        else ($cap[0:20] | join(" "))
+             + (if ($cap | length) > 20 then " (+" + (($cap | length) - 20 | tostring) + " more)" else "" end)
+        end)),
+    "Observed on PATH: " + (([.identity.scans[]? | select(.source == "PATH") | .names] | first) // 0 | tostring)
+      + " executables - jq observations.json, never cat it",
     "Blocks: " + (
       (["skills","commands","models","packs","delegate"]
         - [(.ours.seed_agent // {}) | to_entries[]
@@ -1096,6 +1139,7 @@ agent_state_lines() {
 }
 
 product_system() {
+  ps_task=${1:-}
   cabin_product_system
   printf 'Model: %s (%s)\n' "${LLM_MODEL:-unknown}" "${LLM_PROVIDER:-unknown}"
   if [ "${SEED_RUN_MODE:-agent}" = simple ]; then
@@ -1108,7 +1152,7 @@ product_system() {
     "$PWD/.agent-memory/index.json" \
     "${SEED_SELF:-}"
   agent_state_lines
-  skill_catalog
+  skill_catalog "$ps_task"
 }
 
 agent_pack_get() {
@@ -1129,46 +1173,102 @@ agent_ready() {
   jq -e '.ready == true' "$f" >/dev/null 2>&1
 }
 
+# All Seed processes that share one state root use this coarse lock for
+# read-modify-write operations. mkdir is the portable atomic claim; the owner
+# file lets a later process recover a lock whose process no longer exists.
+agent_state_lock_acquire() {
+  al_store=$INSTALL/agent-store
+  al_lock=$al_store/.state.lock
+  if [ "${AGENT_STATE_LOCK_DEPTH:-0}" -gt 0 ]; then
+    AGENT_STATE_LOCK_DEPTH=$((AGENT_STATE_LOCK_DEPTH + 1))
+    return 0
+  fi
+  mkdir -p "$al_store" || return 1
+  al_try=0
+  al_empty=0
+  al_max=${SEED_STATE_LOCK_WAIT:-30}
+  while ! mkdir "$al_lock" 2>/dev/null; do
+    al_owner=$(sed -n '1p' "$al_lock/owner" 2>/dev/null || true)
+    case $al_owner in
+      '')
+        al_empty=$((al_empty + 1))
+        if [ "$al_empty" -ge 2 ] && rmdir "$al_lock" 2>/dev/null; then
+          al_empty=0
+          continue
+        fi ;;
+      *[!0-9]*) al_empty=0 ;;
+      *)
+        al_empty=0
+        if ! kill -0 "$al_owner" 2>/dev/null; then
+          rm -f "$al_lock/owner" 2>/dev/null || :
+          rmdir "$al_lock" 2>/dev/null || :
+          continue
+        fi ;;
+    esac
+    al_try=$((al_try + 1))
+    [ "$al_try" -lt "$al_max" ] || {
+      printf 'error: agent state lock timed out\n' >&2
+      return 75
+    }
+    sleep 1
+  done
+  printf '%s\n' "$$" > "$al_lock/owner" || {
+    rmdir "$al_lock" 2>/dev/null || :
+    return 1
+  }
+  AGENT_STATE_LOCK_DIR=$al_lock
+  AGENT_STATE_LOCK_DEPTH=1
+}
+
+agent_state_lock_release() {
+  ar_depth=${AGENT_STATE_LOCK_DEPTH:-0}
+  [ "$ar_depth" -gt 0 ] || return 0
+  ar_depth=$((ar_depth - 1))
+  AGENT_STATE_LOCK_DEPTH=$ar_depth
+  [ "$ar_depth" -eq 0 ] || return 0
+  ar_lock=${AGENT_STATE_LOCK_DIR:-$INSTALL/agent-store/.state.lock}
+  ar_owner=$(sed -n '1p' "$ar_lock/owner" 2>/dev/null || true)
+  if [ "$ar_owner" = "$$" ]; then
+    rm -f "$ar_lock/owner" 2>/dev/null || :
+    rmdir "$ar_lock" 2>/dev/null || :
+  fi
+  AGENT_STATE_LOCK_DIR=
+}
+
 agent_repair_machine_tree() {
   f=$INSTALL/agent-store/index.json
   pack=$INSTALL/agent-store/packs/init.json
   [ -f "$f" ] || return 1
   [ -f "$pack" ] || return 1
-  tmp=$(mktemp "${TMPDIR:-/tmp}/seed-repair.XXXXXX")
+  agent_state_lock_acquire || return $?
+  tmp=$(mktemp "$INSTALL/agent-store/.index.repair.XXXXXX") || {
+    agent_state_lock_release
+    return 1
+  }
   if jq --slurpfile pack "$pack" '
     ($pack[0].machine_tree) as $tpl
-    | if (has("system") | not) or (.system | type != "object") then .
+    | if (type != "object") then .
       else
-        if (has("ready") | not) and (.system.ready == true) then .ready = true else . end
-        | if (has("version") | not) or (.version == null) or (.version == "") then
-            .version = $tpl.version
-          else . end
-        | if (has("ours") | not) then .ours = $tpl.ours else . end
-        | if (.system | has("retrieve") | not)
-            or (.system.retrieve | type != "string")
-            or ((.system.retrieve | length) == 0) then
-            .system.retrieve = $tpl.system.retrieve
-          else . end
-        | if (.system | has("other") | not) then .system.other = $tpl.system.other else . end
-        | if (.system | has("tools") | not) or (.system.tools | type != "object") then
-            .system.tools = $tpl.system.tools
-          else
-            .system.tools = ($tpl.system.tools * .system.tools)
-          end
-        | if (.system | has("skills") | not) then
-            if (.skills | type == "array") then .system.skills = .skills
-            else .system.skills = $tpl.system.skills
-            end
-          else . end
-        | if (.system | has("web") | not) and ($tpl.system | has("web")) then
-            .system["web"] = $tpl.system["web"]
-          else . end
+        .version = $tpl.version
+        | (if (.identity | type) != "object" then .identity = $tpl.identity
+           else .identity = ($tpl.identity * .identity) end)
+        | (if (.capabilities | type) != "array" then .capabilities = [] else . end)
+        | (if (.resources | type) != "array" then .resources = [] else . end)
+        | (if (.agent | type) != "object" then .agent = $tpl.agent else . end)
+        | (if (.agent.skills | type) != "array" then .agent.skills = [] else . end)
+        | (if (.system | type) != "object" then .system = $tpl.system else . end)
+        | (if (.system.retrieve | type) != "string"
+              or ((.system.retrieve | length) == 0) then
+             .system.retrieve = $tpl.system.retrieve else . end)
+        | (if (.system | has("web") | not) then .system.web = $tpl.system.web else . end)
+        | (if (has("ours") | not) then .ours = $tpl.ours else . end)
       end
-  ' "$f" > "$tmp"; then
-    mv "$tmp" "$f"
+  ' "$f" > "$tmp" && mv "$tmp" "$f"; then
+    agent_state_lock_release
     return 0
   fi
   rm -f "$tmp"
+  agent_state_lock_release
   return 1
 }
 
@@ -1178,15 +1278,18 @@ agent_check_machine_tree() {
   jq -e '
     type == "object"
     and .ready == true
-    and has("version")
-    and has("system")
-    and has("ours")
-    and (.system | has("tools") and has("skills") and has("other") and has("retrieve"))
-    and (.system.retrieve | type=="string" and length>0)
-    and (.system.tools | has("sh") and has("curl") and has("jq")
-         and has("rg") and has("git") and has("python"))
-    and (.system.tools | to_entries
-         | all(.value | has("ok") and has("present") and has("path")))
+    and .version == "2"
+    and (.identity | type) == "object"
+    and (.identity.os | type == "string")
+    and ((.identity.prereqs | type) == "object")
+    and (.identity.prereqs | has("sh") and has("curl") and has("jq"))
+    and (.capabilities | type) == "array"
+    and (.resources | type) == "array"
+    and ((.agent | type) == "object")
+    and ((.agent.skills | type) == "array")
+    and ((.system | type) == "object")
+    and ((.system.retrieve | type) == "string")
+    and ((.system.retrieve | length) > 0)
   ' "$f" >/dev/null 2>&1
 }
 
@@ -1203,28 +1306,36 @@ agent_write_baseline() {
   pack=$store/packs/init.json
   base=$(agent_baseline_file)
   [ -f "$pack" ] || return 1
-  pj=$(mktemp "${TMPDIR:-/tmp}/seed-basep.XXXXXX")
-  {
-    printf '{'
-    sep=
-    for pt in sh curl jq rg git python; do
-      printf '%s"%s":%s' "$sep" "$pt" "$(agent_probe_one "$pt")"
-      sep=,
-    done
-    printf '}\n'
-  } > "$pj"
-  tmp=$(mktemp "${TMPDIR:-/tmp}/seed-basew.XXXXXX")
+  agent_state_lock_acquire || return $?
+  pj=$(mktemp "$store/.baseline.prereqs.XXXXXX") || {
+    agent_state_lock_release
+    return 1
+  }
+  if ! printf '{"sh":%s,"curl":%s,"jq":%s}\n' \
+      "$(agent_prereq_json sh)" "$(agent_prereq_json curl)" \
+      "$(agent_prereq_json jq)" > "$pj"; then
+    rm -f "$pj" 2>/dev/null || :
+    agent_state_lock_release
+    return 1
+  fi
+  tmp=$(mktemp "$store/.index.baseline.XXXXXX") || {
+    rm -f "$pj" 2>/dev/null || :
+    agent_state_lock_release
+    return 1
+  }
   if jq --slurpfile t "$pj" '
       .machine_tree
       | .ready = true
-      | .system.tools = $t[0]
-    ' "$pack" > "$tmp" 2>/dev/null; then
-    mv "$tmp" "$base"
+      | .identity.prereqs = $t[0]
+    ' "$pack" > "$tmp" 2>/dev/null \
+    && mv "$tmp" "$base" \
+    && agent_check_machine_tree "$base"; then
     rm -f "$pj"
-    agent_check_machine_tree "$base"
-    return $?
+    agent_state_lock_release
+    return 0
   fi
   rm -f "$tmp" "$pj"
+  agent_state_lock_release
   return 1
 }
 
@@ -1233,49 +1344,89 @@ agent_restore_baseline() {
   dest=$INSTALL/agent-store/index.json
   [ -f "$base" ] || return 1
   agent_check_machine_tree "$base" || return 1
-  mv "$base" "$dest"
-  agent_check_machine_tree "$dest"
+  agent_state_lock_acquire || return $?
+  if mv "$base" "$dest" && agent_check_machine_tree "$dest"; then
+    agent_state_lock_release
+    return 0
+  fi
+  agent_state_lock_release
+  return 1
+}
+
+agent_init_pack_ok() {
+  jq -e '
+    type == "object"
+    and (.prompt | type) == "string" and (.prompt | length) > 0
+    and (.machine_tree | type) == "object"
+    and .machine_tree.version == "2"
+    and (.machine_tree.identity | type) == "object"
+    and (.machine_tree.identity.prereqs | type) == "object"
+    and (.machine_tree.identity.prereqs
+         | has("sh") and has("curl") and has("jq"))
+    and (.machine_tree.capabilities | type) == "array"
+    and (.machine_tree.resources | type) == "array"
+    and (.machine_tree.agent.skills | type) == "array"
+    and (.machine_tree.system.retrieve | type) == "string"
+    and (.machine_tree.system.retrieve | length) > 0
+    and (.observations_tree | type) == "object"
+    and .observations_tree.version == "2"
+    and (.observations_tree.observations | type) == "array"
+    and (.memory_tree | type) == "object"
+    and .memory_tree.ready == true
+    and .memory_tree.version == "2"
+    and (.memory_tree.notes | type) == "array"
+    and (.memory_tree.facts | type) == "array"
+  ' "$@" >/dev/null 2>&1
 }
 
 agent_fetch_pack() {
-  fp_strict=$1
-  fp_index=$2
+  fp_index=$1
   store=$INSTALL/agent-store
   mkdir -p "$store/packs"
   root=$(pack_root)
   rel=$(printf '%s' "$fp_index" | jq -r '.required.init // empty')
   [ -n "$rel" ] || die "agent pack: catalog has no required.init" 69
   body=$(agent_pack_get "$(pack_join "$root/agent" "$rel")")
-  if [ "$fp_strict" -eq 1 ]; then
-    printf '%s' "$body" | jq -e \
-      'type == "object" and has("prompt") and has("machine_tree") and has("memory_tree")' \
-      >/dev/null 2>&1 || die "agent pack: init pack invalid" 69
-  else
-    printf '%s' "$body" | jq -e 'has("prompt")' >/dev/null 2>&1 \
-      || die "agent pack: init pack invalid" 69
+  printf '%s' "$body" | agent_init_pack_ok \
+    || die "agent pack: init pack invalid" 69
+  tmpc=$(mktemp "$store/.catalog.XXXXXX") || return 1
+  tmpi=$(mktemp "$store/packs/.init.XXXXXX") || {
+    rm -f "$tmpc" 2>/dev/null || :
+    return 1
+  }
+  if ! printf '%s\n' "$fp_index" > "$tmpc" \
+    || ! printf '%s\n' "$body" > "$tmpi"; then
+    rm -f "$tmpc" "$tmpi" 2>/dev/null || :
+    return 1
   fi
-  tmpc=$(mktemp "${TMPDIR:-/tmp}/seed-acat.XXXXXX")
-  tmpi=$(mktemp "${TMPDIR:-/tmp}/seed-ainit.XXXXXX")
-  printf '%s\n' "$fp_index" > "$tmpc"
-  printf '%s\n' "$body" > "$tmpi"
-  mv "$tmpi" "$store/packs/init.json"
-  mv "$tmpc" "$store/catalog.json"
+  agent_state_lock_acquire || { rm -f "$tmpc" "$tmpi"; return 75; }
+  fp_status=0
+  mv "$tmpi" "$store/packs/init.json" || fp_status=$?
+  if [ "$fp_status" -eq 0 ]; then
+    mv "$tmpc" "$store/catalog.json" || fp_status=$?
+  fi
+  rm -f "$tmpc" "$tmpi" 2>/dev/null || :
+  agent_state_lock_release
+  [ "$fp_status" -eq 0 ] || return "$fp_status"
 }
 
 agent_fetch_required() {
   store=$INSTALL/agent-store
   mkdir -p "$store/packs"
-  if [ -f "$store/catalog.json" ] && [ -f "$store/packs/init.json" ]; then
+  if jq -e 'type == "object" and (.required.init | type) == "string"' \
+      "$store/catalog.json" >/dev/null 2>&1 \
+    && agent_init_pack_ok "$store/packs/init.json"; then
     return 0
   fi
   root=$(pack_root)
   index=$(agent_pack_get "$root/agent/index.json")
   printf '%s' "$index" | jq -e 'type == "object"' >/dev/null 2>&1 \
     || die "agent pack: catalog is not JSON" 69
-  agent_fetch_pack 1 "$index"
+  agent_fetch_pack "$index"
 }
 
 agent_try_update() {
+  [ "${SEED_AUTO_UPDATE:-}" = 1 ] || return 0
   [ "${SEED_SKIP_UPDATE:-}" = 1 ] && return 0
   [ -f "$INSTALL/agent-store/catalog.json" ] || return 0
   if ( agent_update ) 2>/dev/null; then
@@ -1285,68 +1436,1150 @@ agent_try_update() {
   return 0
 }
 
+agent_ensure_project_memory() {
+  ep_dir=$PWD/.agent-memory
+  ep_dest=$ep_dir/index.json
+  if [ -L "$ep_dir" ] || [ -L "$ep_dest" ]; then
+    printf 'error: project memory path must not be a symlink\n' >&2
+    return 76
+  fi
+  if [ -f "$ep_dest" ]; then
+    if jq -e 'type == "object" and .ready == true and .version == "2"
+      and (.notes | type) == "array" and (.facts | type) == "array"' \
+      "$ep_dest" >/dev/null 2>&1; then
+      return 0
+    fi
+    if jq -e 'type == "object" and (.version == "1" or (has("version") | not))
+        and (.notes | type) == "array" and (.facts | type) == "array"' \
+        "$ep_dest" >/dev/null 2>&1; then
+      agent_state_lock_acquire || return $?
+      ep_tmp=$(mktemp "$ep_dir/.index.XXXXXX") || {
+        agent_state_lock_release
+        return 76
+      }
+      if jq '.ready = true | .version = "2"' "$ep_dest" > "$ep_tmp" 2>/dev/null \
+        && mv "$ep_tmp" "$ep_dest"; then
+        agent_state_lock_release
+        return 0
+      fi
+      rm -f "$ep_tmp" 2>/dev/null || :
+      agent_state_lock_release
+    fi
+    printf 'error: project memory index is invalid\n' >&2
+    return 76
+  fi
+  if [ -e "$ep_dir" ] && [ ! -d "$ep_dir" ]; then
+    printf 'error: memory index path is not a directory\n' >&2
+    return 76
+  fi
+  agent_state_lock_acquire || return $?
+  ep_status=0
+  if mkdir -p "$ep_dir" 2>/dev/null; then
+    ep_tmp=$(mktemp "$ep_dir/.index.XXXXXX") || ep_status=$?
+    if [ "$ep_status" -eq 0 ]; then
+      printf '%s\n' '{"ready":true,"version":"2","notes":[],"facts":[]}' > "$ep_tmp" \
+        && mv "$ep_tmp" "$ep_dest" || ep_status=$?
+      [ "$ep_status" -eq 0 ] || rm -f "$ep_tmp" 2>/dev/null || :
+    fi
+  else
+    ep_status=76
+  fi
+  agent_state_lock_release
+  if [ "$ep_status" -ne 0 ]; then
+    printf 'error: memory index not writable\n' >&2
+    return 76
+  fi
+  jq -e '.ready == true and .version == "2"' "$ep_dest" >/dev/null 2>&1
+}
+
 agent_place_trees() {
   store=$INSTALL/agent-store
   pack=$store/packs/init.json
-  [ -f "$pack" ] || die "agent pack: init pack missing" 69
+  [ -f "$pack" ] || { printf 'error: agent pack: init pack missing\n' >&2; return 69; }
+  agent_state_lock_acquire || return $?
+  pt_status=0
   if [ ! -f "$store/index.json" ]; then
-    jq '.machine_tree' "$pack" > "$store/index.json"
-  fi
-  memdir=$PWD/.agent-memory
-  if [ ! -f "$memdir/index.json" ]; then
-    if mkdir -p "$memdir" 2>/dev/null \
-      && jq '.memory_tree' "$pack" > "$memdir/index.json" 2>/dev/null; then
-      :
-    else
-      printf 'error: memory index not writable\n' >&2
+    pt_tmp=$(mktemp "$store/.index.XXXXXX") || pt_status=$?
+    if [ "$pt_status" -eq 0 ]; then
+      jq '.machine_tree' "$pack" > "$pt_tmp" 2>/dev/null \
+        && mv "$pt_tmp" "$store/index.json" || pt_status=$?
+      [ "$pt_status" -eq 0 ] || rm -f "$pt_tmp" 2>/dev/null || :
     fi
   fi
+  if [ "$pt_status" -eq 0 ] && [ ! -f "$store/observations.json" ]; then
+    pt_tmp=$(mktemp "$store/.observations.XXXXXX") || pt_status=$?
+    if [ "$pt_status" -eq 0 ]; then
+      jq '.observations_tree // {version:"2",updated:"",observations:[]}' "$pack" \
+        > "$pt_tmp" 2>/dev/null \
+        && mv "$pt_tmp" "$store/observations.json" || pt_status=$?
+      [ "$pt_status" -eq 0 ] || rm -f "$pt_tmp" 2>/dev/null || :
+    fi
+  fi
+  agent_state_lock_release
+  [ "$pt_status" -eq 0 ] || return "$pt_status"
+  agent_ensure_project_memory
 }
 
-agent_probe_one() {
-  pt=$1
-  pb=$(command -v "$pt" 2>/dev/null || true)
-  if [ -z "$pb" ] && [ "$pt" = python ]; then
-    pb=$(command -v python3 2>/dev/null || true)
-  fi
+# One canonical lowercase os token, used by identity, capability scope, and
+# experience scope.os, so the three layers never disagree about what machine
+# this is.
+agent_os_token() {
+  ot=$(uname -s 2>/dev/null || printf unknown)
+  ot=$(printf '%s' "$ot" | tr 'ABCDEFGHIJKLMNOPQRSTUVWXYZ' 'abcdefghijklmnopqrstuvwxyz')
+  case $ot in
+    darwin|macos|osx) printf 'darwin' ;;
+    linux) printf 'linux' ;;
+    windows_nt|windows|mingw*|msys*|cygwin*) printf 'windows' ;;
+    *) printf '%s' "$ot" ;;
+  esac
+}
+
+# sh, curl and jq are not capabilities the model discovered — the loop cannot
+# run without them. The runtime owns these three and nothing else: every other
+# thing on the machine is discovered, investigated and verified by a task.
+agent_prereq_json() {
+  pq=$1
+  pb=$(command -v "$pq" 2>/dev/null || true)
   if [ -z "$pb" ]; then
-    jq -nc '{present:false,path:"",ok:false,note:"not found"}'
+    jq -nc '{path:"",ok:false,probe:""}'
     return 0
   fi
-  pok=false
-  case $pt in
-    sh) "$pb" -c 'echo sh_ok' >/dev/null 2>&1 && pok=true ;;
-    jq) "$pb" -n . >/dev/null 2>&1 && pok=true ;;
-    *) "$pb" --version >/dev/null 2>&1 && pok=true ;;
+  po=false
+  case $pq in
+    sh) pc="$pb -c 'echo ok'"; "$pb" -c 'echo ok' >/dev/null 2>&1 && po=true ;;
+    jq) pc="$pb -n ."; "$pb" -n . >/dev/null 2>&1 && po=true ;;
+    *)  pc="$pb --version"; "$pb" --version >/dev/null 2>&1 && po=true ;;
   esac
-  jq -nc --arg p "$pb" --argjson ok "$pok" \
-    '{present:true,path:$p,ok:$ok,note:""}'
+  jq -nc --arg p "$pb" --arg c "$pc" --argjson o "$po" '{path:$p,ok:$o,probe:$c}'
 }
 
-agent_probe_tools() {
-  f=$INSTALL/agent-store/index.json
-  [ -f "$f" ] || return 0
-  pj=$(mktemp "${TMPDIR:-/tmp}/seed-probe.XXXXXX")
-  {
-    printf '{'
-    sep=
-    for pt in sh curl jq rg git python; do
-      printf '%s"%s":%s' "$sep" "$pt" "$(agent_probe_one "$pt")"
-      sep=,
-    done
-    printf '}\n'
-  } > "$pj"
-  tmp=$(mktemp "${TMPDIR:-/tmp}/seed-probew.XXXXXX")
-  if jq --slurpfile t "$pj" '
-      if (.system? | type) == "object"
-      then .system.tools = $t[0]
-      else . end
-    ' "$f" > "$tmp" 2>/dev/null; then
-    mv "$tmp" "$f"
-  else
-    rm -f "$tmp"
+# Discovery is hardcoded; environment knowledge is not. This enumerates PATH
+# and nothing else: no version flags, no package managers, no os-specific
+# guesses. A name here means the file exists and is executable, which is all an
+# observation ever claims. Subshell so IFS never leaks.
+agent_sweep_path() {
+  ( IFS=:
+    for sd in $PATH; do
+      [ -n "$sd" ] || continue
+      [ -d "$sd" ] || continue
+      for sp in "$sd"/* "$sd"/.[!.]* "$sd"/..?*; do
+        [ -f "$sp" ] && [ -x "$sp" ] || continue
+        printf '%s\n' "$sp"
+      done
+    done )
+}
+
+# Launch work: confirm the three prerequisites, refresh identity, re-sweep
+# PATH. Capabilities are never re-probed here — verification happens at use,
+# which is the only time the answer matters.
+agent_bootstrap_machine() {
+  bm_f=$INSTALL/agent-store/index.json
+  bm_obs=$INSTALL/agent-store/observations.json
+  [ -f "$bm_f" ] || return 0
+  agent_state_lock_acquire || return $?
+  bm_status=0
+  bm_pq=
+  bm_tsv=
+  bm_old=$bm_obs
+  bm_old_tmp=
+  bm_ot=
+  bm_it=
+  bm_now=$(date -u +%Y-%m-%dT%H:%M:%SZ) || bm_status=$?
+
+  if [ "$bm_status" -eq 0 ]; then
+    bm_pq=$(mktemp "${TMPDIR:-/tmp}/seed-prereq.XXXXXX") || bm_status=$?
   fi
-  rm -f "$pj"
+  if [ "$bm_status" -eq 0 ]; then
+    printf '{"sh":%s,"curl":%s,"jq":%s}\n' \
+      "$(agent_prereq_json sh)" "$(agent_prereq_json curl)" \
+      "$(agent_prereq_json jq)" > "$bm_pq" || bm_status=$?
+  fi
+
+  if [ "$bm_status" -eq 0 ]; then
+    bm_tsv=$(mktemp "${TMPDIR:-/tmp}/seed-sweep.XXXXXX") || bm_status=$?
+  fi
+  if [ "$bm_status" -eq 0 ]; then
+    agent_sweep_path \
+      | awk '{p=$0; n=p; sub(/.*\//,"",n); if (n != "" && !seen[n]++) print n "\t" p}' \
+        > "$bm_tsv" 2>/dev/null || bm_status=$?
+  fi
+  if [ "$bm_status" -eq 0 ]; then
+    bm_n=$(awk 'END{print NR+0}' "$bm_tsv") || bm_status=$?
+  fi
+
+  if [ "$bm_status" -eq 0 ] && [ ! -f "$bm_old" ]; then
+    bm_old_tmp=$(mktemp "$INSTALL/agent-store/.observations.base.XXXXXX") \
+      || bm_status=$?
+    if [ "$bm_status" -eq 0 ]; then
+      printf '{"version":"2","updated":"","observations":[]}\n' \
+        > "$bm_old_tmp" || bm_status=$?
+      bm_old=$bm_old_tmp
+    fi
+  fi
+  if [ "$bm_status" -eq 0 ]; then
+    bm_ot=$(mktemp "$INSTALL/agent-store/.observations.bootstrap.XXXXXX") \
+      || bm_status=$?
+  fi
+  # Only PATH rows are replaced: an observation a task wrote by looking
+  # somewhere else (a vendor directory, an applet list) outlives every sweep.
+  if [ "$bm_status" -eq 0 ] && ! jq -R -s --arg u "$bm_now" --slurpfile old "$bm_old" '
+      (split("\n") | map(select(length > 0)) | map(split("\t"))
+        | map({type:"executable", name:.[0], path:.[1], source:"PATH"})) as $sweep
+      | {version: "2", updated: $u,
+         observations: ((($old[0].observations // [])
+                          | map(select(.source != "PATH"))) + $sweep)}
+    ' "$bm_tsv" > "$bm_ot" 2>/dev/null; then
+    bm_status=1
+  fi
+
+  if [ "$bm_status" -eq 0 ]; then
+    bm_it=$(mktemp "$INSTALL/agent-store/.index.bootstrap.XXXXXX") \
+      || bm_status=$?
+  fi
+  if [ "$bm_status" -eq 0 ] && ! jq --slurpfile q "$bm_pq" --arg u "$bm_now" \
+        --arg os "$(agent_os_token)" \
+        --arg kernel "$(uname -s 2>/dev/null || printf unknown)" \
+        --arg arch "$(uname -m 2>/dev/null || printf unknown)" \
+        --arg ush "${SHELL:-/bin/sh}" --arg home "${HOME:-}" --arg pth "${PATH:-}" \
+        --argjson n "$bm_n" '
+      if (type == "object") then
+        .identity = ((.identity // {}) + {
+            os: $os, kernel: $kernel, arch: $arch, shell: $ush, home: $home,
+            path_dirs: ($pth | split(":") | map(select(length > 0))),
+            prereqs: $q[0]})
+        | .identity.scans = ((((.identity.scans // []) | map(select(.source != "PATH")))
+            + [{source:"PATH", at:$u, names:$n}]))
+        | .updated = $u
+      else . end
+    ' "$bm_f" > "$bm_it" 2>/dev/null; then
+    bm_status=1
+  fi
+  if [ "$bm_status" -eq 0 ]; then
+    mv "$bm_ot" "$bm_obs" || bm_status=$?
+  fi
+  if [ "$bm_status" -eq 0 ]; then
+    mv "$bm_it" "$bm_f" || bm_status=$?
+  fi
+  rm -f "$bm_pq" "$bm_tsv" "$bm_old_tmp" "$bm_ot" "$bm_it" \
+    2>/dev/null || :
+  agent_state_lock_release
+  [ "$bm_status" -eq 0 ] || return "$bm_status"
+}
+
+# v1 indexes were keyed on a fixed six-tool object plus flat resource and other
+# lists. Nothing is dropped: every entry that named something real becomes a
+# capability, carrying whatever the model had already learned about it.
+agent_migrate_index_v2() {
+  mi_f=$INSTALL/agent-store/index.json
+  [ -f "$mi_f" ] || return 0
+  jq -e '.version == "2" and (.identity | type) == "object"' "$mi_f" >/dev/null 2>&1 && return 0
+  agent_state_lock_acquire || return $?
+  # Some early v2 writers produced the complete array-shaped schema but left
+  # the version label at 1. Relabel that shape in place; rebuilding it through
+  # the old fixed-tool migration would discard already-curated capabilities.
+  if jq -e '(.identity | type) == "object"
+      and (.capabilities | type) == "array"
+      and (.resources | type) == "array"
+      and (.agent.skills | type) == "array"
+      and (.system.retrieve | type) == "string"' "$mi_f" >/dev/null 2>&1; then
+    mi_t=$(mktemp "$INSTALL/agent-store/.index.migrate.XXXXXX") || {
+      agent_state_lock_release
+      return 1
+    }
+    if jq '.version = "2"' "$mi_f" > "$mi_t" 2>/dev/null \
+      && mv "$mi_t" "$mi_f"; then
+      agent_state_lock_release
+      printf 'note: machine index v2 label repaired\n' >&2
+      return 0
+    fi
+    rm -f "$mi_t" 2>/dev/null || :
+    agent_state_lock_release
+    return 1
+  fi
+  if ! jq -e '(.system | type) == "object"' "$mi_f" >/dev/null 2>&1; then
+    agent_state_lock_release
+    return 1
+  fi
+  mi_t=$(mktemp "$INSTALL/agent-store/.index.migrate.XXXXXX") || {
+    agent_state_lock_release
+    return 1
+  }
+  if jq '
+      def aslist: if . == null then [] elif type == "array" then . else [tostring] end;
+      def isurl: (type == "string") and (startswith("http://") or startswith("https://"));
+      ((.system.tools // {}) | to_entries
+        | map(select((.value.present == true) or ((.value.note // "") != "")))
+        | map({id: ("local:" + .key), name: .key, kind: "cli",
+               locator: (.value.path // ""), purpose: [], use: "", needs: [],
+               observed: (.value.present == true), understood: false,
+               verified: (.value.ok == true),
+               ok: (.value.ok == true),
+               probe: (if (.value.probe // "") != "" then .value.probe
+                       elif (.value.ok != true) or ((.value.path // "") == "") then ""
+                       # v1 recorded no probe string, but the smoke test the
+                       # old runtime ran is known. Reconstruct it so a migrated
+                       # capability can still be re-verified, instead of being
+                       # ok forever with no way to check.
+                       elif .key == "sh" then (.value.path + " -c \"echo sh_ok\"")
+                       elif .key == "jq" then (.value.path + " -n .")
+                       else (.value.path + " --version") end),
+               evidence: [],
+               observed_at: "", verified_at: "", scope: (.value.scope // []),
+               skill: "", note: (.value.note // "")})) as $fromtools
+      | (((.system.resources // []) + (.system.other // []))
+        | map(. as $r
+              | {id: ("local:" + ($r.name // "")), name: ($r.name // ""),
+                 kind: ($r.kind // "cli"), locator: (($r.path // $r.url) // ""),
+                 purpose: ($r.purpose | aslist), use: ($r.use // ""),
+                 needs: ($r.needs | aslist),
+                 observed: true, understood: (($r.use // "") != ""),
+                 verified: ($r.ok == true), ok: ($r.ok == true),
+                 probe: ($r.probe // ""), evidence: [], observed_at: "",
+                 verified_at: ($r.probed // ""), scope: ($r.scope | aslist),
+                 skill: ($r.skill // ""), note: ($r.note // "")})) as $fromres
+      | {ready: (.ready // false), version: "2", updated: (.updated // ""),
+         identity: {os: ((.system.env.os // "") | ascii_downcase),
+                    kernel: (.system.env.kernel // ""),
+                    arch: (.system.env.arch // ""),
+                    shell: (.system.env.shell // ""),
+                    home: "", path_dirs: [], prereqs: {}, scans: []},
+         capabilities: ($fromtools
+                        + ($fromres | map(select((.kind != "source")
+                                                 and ((.locator | isurl) | not))))),
+         resources: ($fromres | map(select((.kind == "source")
+                                           or (.locator | isurl)))),
+         agent: {skills: (.system.skills // [])},
+         system: {retrieve: (.system.retrieve // ""),
+                  web: (.system.web // {})},
+         ours: (.ours // {})}
+    ' "$mi_f" > "$mi_t" 2>/dev/null && mv "$mi_t" "$mi_f"; then
+    agent_state_lock_release
+    printf 'note: machine index migrated to v2 (observations/capabilities/resources)\n' >&2
+    return 0
+  else
+    rm -f "$mi_t"
+    agent_state_lock_release
+    return 1
+  fi
+}
+
+# Experience IDs are also directory names and skill names. Enforce the Agent
+# Skills slug shape before constructing a path, so a memory row can never use
+# ../ to publish a file outside the experience store.
+agent_experience_id_ok() {
+  ei_id=$1
+  ei_n=$(printf '%s' "$ei_id" | wc -c | tr -d ' ')
+  [ "$ei_n" -ge 1 ] && [ "$ei_n" -le 64 ] || return 1
+  case $ei_id in
+    *[!a-z0-9-]*|-*|*-|*--*) return 1 ;;
+  esac
+  return 0
+}
+
+# Experience skills use the strict, small subset of YAML frontmatter that Seed
+# writes: one unambiguous name and description before the closing delimiter.
+agent_skill_file_ok() {
+  sf_file=$1
+  sf_id=$2
+  sf_description=${3:-}
+  [ -r "$sf_file" ] || return 1
+  awk -v want="$sf_id" -v want_description="$sf_description" '
+    function clean(v) {
+      sub(/^[ \t]*/, "", v); sub(/[ \t]*$/, "", v)
+      if ((v ~ /^".*"$/) || (v ~ /^\047.*\047$/)) v=substr(v,2,length(v)-2)
+      return v
+    }
+    NR == 1 { if ($0 != "---") exit 1; front=1; next }
+    front && $0 == "---" { done=1; exit }
+    front && /^name:[ \t]*/ {
+      names++; v=$0; sub(/^name:[ \t]*/, "", v); name=clean(v); next
+    }
+    front && /^description:[ \t]*/ {
+      descriptions++; v=$0; sub(/^description:[ \t]*/, "", v); desc=clean(v); next
+    }
+    END {
+      if (!done || names != 1 || descriptions != 1 || name != want || desc == "") exit 1
+      if (want_description != "" && desc != want_description) exit 1
+    }
+  ' "$sf_file" >/dev/null 2>&1
+}
+
+# Missing frontmatter is an unambiguous authoring omission: exp.json and the
+# synchronized catalog already own the canonical name and description. Allow
+# the normalizer to add it, but reject any present-yet-invalid frontmatter so a
+# conflicting name or malformed header is never silently rewritten.
+agent_skill_file_repairable() {
+  sr_file=$1
+  sr_id=$2
+  if agent_skill_file_ok "$sr_file" "$sr_id"; then
+    return 0
+  fi
+  [ -s "$sr_file" ] || return 1
+  sr_first=$(sed -n '1p' "$sr_file") || return 1
+  [ "$sr_first" != '---' ]
+}
+
+# A candidate is a model proposal, not a usable experience. Validate the
+# complete proposal before the runtime executes any command from it. Candidate
+# evidence may come from the proposing task, but it never authorizes
+# publication; only a later runtime maintenance receipt does that.
+agent_experience_candidate_ok() {
+  ec_store=$1
+  ec_id=$2
+  ec_started=$3
+  ec_mode=${4:-candidate}
+  case $ec_mode in candidate|legacy|repairable|normalized) ;; *) return 1 ;; esac
+  agent_experience_id_ok "$ec_id" || return 1
+  ec_dir=$ec_store/experiences/$ec_id
+  ec_exp=$ec_dir/exp.json
+  ec_skill=$ec_dir/SKILL.md
+  ec_index=$ec_store/experiences/index.json
+  [ -d "$ec_store" ] && [ ! -L "$ec_store" ] || return 1
+  [ -d "$ec_store/experiences" ] && [ ! -L "$ec_store/experiences" ] || return 1
+  [ -d "$ec_dir" ] && [ ! -L "$ec_dir" ] || return 1
+  [ -f "$ec_exp" ] && [ ! -L "$ec_exp" ] || return 1
+  [ -f "$ec_skill" ] && [ ! -L "$ec_skill" ] || return 1
+  [ -f "$ec_index" ] && [ ! -L "$ec_index" ] || return 1
+  [ -d "$ec_store/runs" ] && [ ! -L "$ec_store/runs" ] || return 1
+  ec_title=$(jq -er '.title | select(type == "string")' "$ec_exp" 2>/dev/null) \
+    || return 1
+  if [ "$ec_mode" = repairable ]; then
+    agent_skill_file_repairable "$ec_skill" "$ec_id" || return 1
+  else
+    agent_skill_file_ok "$ec_skill" "$ec_id" "$ec_title" || return 1
+  fi
+  jq -Rs -e 'test("[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]") | not' \
+    "$ec_skill" >/dev/null 2>&1 || return 1
+  jq -e --arg id "$ec_id" --arg started "$ec_started" --arg mode "$ec_mode" '
+    def string_array: type == "array" and all(.[]; type == "string");
+    def utc: type == "string" and test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$");
+    def noop:
+      ascii_downcase | gsub("^[[:space:]]+|[[:space:]]+$"; "")
+      | . == "true" or . == ":" or . == "exit 0" or startswith("echo ");
+    type == "object"
+    and ([.. | strings
+          | select(test("[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]"))]
+         | length) == 0
+    and keys == ["applies_if","created_at","evidence","failures","id","kind",
+                 "last_verified","preconditions","quarantine_reason","scope",
+                 "status","successes","supersedes","title","verify","version"]
+    and .id == $id
+    and .kind == "procedure"
+    and (.title | type == "string" and length > 0 and (contains("\n") | not))
+    and (if $mode != "legacy" then
+           .status == "candidate" and .successes == 0 and .last_verified == ""
+         else
+           (.status == "active" or .status == "degraded")
+           and (.successes | type == "number" and floor == . and . >= 1)
+           and (.last_verified | utc) and .last_verified > .created_at
+         end)
+    and (.version | type == "number" and floor == . and . >= 1)
+    and (.scope | type == "object")
+    and (.scope | keys) == ["os","task_kinds","tools"]
+    and (.scope.os | string_array and all(.[]; . == ascii_downcase))
+    and (.scope.tools | string_array)
+    and (.scope.task_kinds | string_array)
+    and (.applies_if | string_array)
+    and (.preconditions | string_array)
+    and (.verify | string_array and length > 0
+         and all(.[]; length > 0 and (contains("\n") | not) and (noop | not)))
+    and (.evidence | string_array and length > 0
+         and all(.[];
+           if $mode == "repairable"
+           then test("^(agent-store/)?runs/[A-Za-z0-9][A-Za-z0-9._-]*[.]jsonl$")
+           else test("^agent-store/runs/[A-Za-z0-9][A-Za-z0-9._-]*[.]jsonl$")
+           end))
+    and (.failures | type == "number" and floor == . and . >= 0)
+    and (.created_at | utc)
+    and .created_at < $started
+    and (.supersedes | type == "string")
+    and (.quarantine_reason | type == "string")
+  ' "$ec_exp" >/dev/null 2>&1 || return 1
+
+  jq -e --slurpfile e "$ec_exp" --arg id "$ec_id" --arg store "$ec_store" '
+    [.experiences[]? | select(.id == $id)] as $rows
+    | ($rows | length) == 1
+      and $rows[0].title == $e[0].title
+      and $rows[0].status == $e[0].status
+      and $rows[0].version == $e[0].version
+      and $rows[0].scope == $e[0].scope
+      and $rows[0].applies_if == $e[0].applies_if
+      and ($rows[0].path == $id
+           or $rows[0].path == ("experiences/" + $id)
+           or $rows[0].path == ("agent-store/experiences/" + $id)
+           or $rows[0].path == ($store + "/experiences/" + $id))
+  ' "$ec_index" >/dev/null 2>&1 || return 1
+
+  for ec_rel in $(jq -r '.evidence[]' "$ec_exp"); do
+    case $ec_rel in
+      runs/*) ec_file=$ec_store/$ec_rel ;;
+      *) ec_file=$INSTALL/$ec_rel ;;
+    esac
+    [ -f "$ec_file" ] && [ ! -L "$ec_file" ] || return 1
+    jq -s -e 'length > 0 and all(.[]; type == "object")' "$ec_file" \
+      >/dev/null 2>&1 || return 1
+  done
+  if [ "$ec_mode" != normalized ]; then
+    if ! jq -r '.verify[]' "$ec_exp" | while IFS= read -r ec_cmd; do
+      ec_hit=0
+      for ec_rel in $(jq -r '.evidence[]' "$ec_exp"); do
+        case $ec_rel in
+          runs/*) ec_file=$ec_store/$ec_rel ;;
+          *) ec_file=$INSTALL/$ec_rel ;;
+        esac
+        if jq -s -e --arg id "$ec_id" --arg cmd "$ec_cmd" '
+            def utc: type == "string"
+              and test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$");
+            any(.[];
+              type == "object" and .exp_id == $id and .cmd == $cmd
+              and .exit == 0 and (.utc | utc)
+              and (.note | type == "string")
+              and (.note | test("[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]") | not))
+          ' "$ec_file" >/dev/null 2>&1; then
+          ec_hit=1
+          break
+        fi
+      done
+      [ "$ec_hit" -eq 1 ] || exit 1
+    done; then
+      return 1
+    fi
+  fi
+  return 0
+}
+
+agent_experience_tools_ok() {
+  et_store=$1
+  et_id=$2
+  et_exp=$et_store/experiences/$et_id/exp.json
+  et_index=$et_store/index.json
+  [ -f "$et_exp" ] && [ ! -L "$et_exp" ] || return 1
+  [ -f "$et_index" ] && [ ! -L "$et_index" ] || return 1
+  jq -e --slurpfile e "$et_exp" '
+    . as $index
+    | all(($e[0].scope.tools // [])[];
+        . as $tool
+        | any($index.capabilities[]?; .name == $tool and .ok == true))
+  ' "$et_index" >/dev/null 2>&1
+}
+
+# The stale edge is deterministic: a live record whose declared capability is
+# unavailable is retained but no longer eligible for retrieval.
+agent_experience_mark_stale() {
+  es_store=$1
+  es_id=$2
+  es_exp=$es_store/experiences/$es_id/exp.json
+  es_index=$es_store/experiences/index.json
+  agent_state_lock_acquire || return $?
+  es_exp_tmp=$(mktemp "$es_store/experiences/$es_id/.exp.stale.XXXXXX") || {
+    agent_state_lock_release
+    return 1
+  }
+  es_index_tmp=$(mktemp "$es_store/experiences/.index.stale.XXXXXX") || {
+    rm -f "$es_exp_tmp" 2>/dev/null || :
+    agent_state_lock_release
+    return 1
+  }
+  es_ok=0
+  if jq '.status = "stale"' "$es_exp" > "$es_exp_tmp" 2>/dev/null \
+    && jq --arg id "$es_id" '
+      .experiences |= map(if .id == $id then .status = "stale" else . end)
+    ' "$es_index" > "$es_index_tmp" 2>/dev/null \
+    && jq -e '.status == "stale"' "$es_exp_tmp" >/dev/null 2>&1 \
+    && jq -e --arg id "$es_id" '
+      ([.experiences[]? | select(.id == $id and .status == "stale")] | length) == 1
+    ' "$es_index_tmp" >/dev/null 2>&1 \
+    && mv "$es_exp_tmp" "$es_exp" \
+    && mv "$es_index_tmp" "$es_index"; then
+    es_ok=1
+  fi
+  rm -f "$es_exp_tmp" "$es_index_tmp" 2>/dev/null || :
+  agent_state_lock_release
+  [ "$es_ok" -eq 1 ]
+}
+
+# Active/degraded records created before runtime receipts existed are not
+# grandfathered into publication. An explicit maintenance run first requeues
+# only an otherwise complete legacy record, then verifies it through the same
+# candidate path as every new proposal.
+agent_experience_requeue_legacy() {
+  el_store=$1
+  el_id=$2
+  el_started=$3
+  agent_state_lock_acquire || return $?
+  if ! agent_experience_candidate_ok "$el_store" "$el_id" "$el_started" legacy; then
+    agent_state_lock_release
+    return 1
+  fi
+  el_exp=$el_store/experiences/$el_id/exp.json
+  el_index=$el_store/experiences/index.json
+  el_exp_tmp=$(mktemp "$el_store/experiences/$el_id/.exp.requeue.XXXXXX") || {
+    agent_state_lock_release
+    return 1
+  }
+  el_index_tmp=$(mktemp "$el_store/experiences/.index.requeue.XXXXXX") || {
+    rm -f "$el_exp_tmp" 2>/dev/null || :
+    agent_state_lock_release
+    return 1
+  }
+  el_ok=0
+  if jq '.status = "candidate" | .successes = 0 | .last_verified = ""' \
+      "$el_exp" > "$el_exp_tmp" 2>/dev/null \
+    && jq --arg id "$el_id" '
+      .experiences |= map(if .id == $id then .status = "candidate" else . end)
+    ' "$el_index" > "$el_index_tmp" 2>/dev/null \
+    && mv "$el_exp_tmp" "$el_exp" \
+    && mv "$el_index_tmp" "$el_index"; then
+    el_ok=1
+  fi
+  rm -f "$el_exp_tmp" "$el_index_tmp" 2>/dev/null || :
+  agent_state_lock_release
+  [ "$el_ok" -eq 1 ]
+}
+
+# Canonicalize only metadata and launch-workspace spelling whose source of
+# truth is unambiguous: exp.json and the catalog already agree on the skill
+# name/title, while the runtime knows the exact launch directory. A wholly
+# absent frontmatter block is added; present-but-invalid frontmatter is
+# rejected. A store-relative runs/<file>.jsonl evidence path gets its canonical
+# agent-store/ prefix. A store-relative experiences/<id> catalog path is also
+# accepted and becomes the canonical id during promotion. The procedure body
+# is preserved. Absolute launch prefixes become relative commands, including a
+# redundant `cd <launch-root> &&` prefix, so the experience remains portable
+# to a later workspace.
+agent_experience_normalize_candidate() {
+  en_store=$1
+  en_id=$2
+  en_started=$3
+  en_exp=$en_store/experiences/$en_id/exp.json
+  en_skill=$en_store/experiences/$en_id/SKILL.md
+  agent_state_lock_acquire || return $?
+  if ! agent_experience_candidate_ok "$en_store" "$en_id" "$en_started" repairable; then
+    agent_state_lock_release
+    return 1
+  fi
+  en_title=$(jq -er '.title' "$en_exp") || {
+    agent_state_lock_release
+    return 1
+  }
+  en_exp_tmp=$(mktemp "$en_store/experiences/$en_id/.exp.normalize.XXXXXX") || {
+    agent_state_lock_release
+    return 1
+  }
+  en_skill_tmp=$(mktemp "$en_store/experiences/$en_id/.skill.normalize.XXXXXX") || {
+    rm -f "$en_exp_tmp" 2>/dev/null || :
+    agent_state_lock_release
+    return 1
+  }
+  en_prefix="cd $LAUNCH_CWD/"
+  en_root_prefix="cd $LAUNCH_CWD && "
+  if ! jq --arg prefix "$en_prefix" --arg root_prefix "$en_root_prefix" \
+      --arg cwd "$LAUNCH_CWD" '
+      .evidence |= map(
+        if startswith("runs/") then "agent-store/" + . else . end)
+      | .verify |= map(
+        if startswith($root_prefix) then .[($root_prefix | length):]
+        elif startswith($prefix) then "cd " + .[($prefix | length):]
+        else . end)
+      | select(all(.verify[]; (contains($cwd) | not)))
+    ' "$en_exp" > "$en_exp_tmp" 2>/dev/null \
+    || ! {
+      printf '%s\n' '---' "name: $en_id" "description: $en_title" '---'
+      awk '
+        NR == 1 && $0 == "---" { front=1; next }
+        front && $0 == "---" { front=0; next }
+        !front { print }
+      ' "$en_skill"
+    } > "$en_skill_tmp"; then
+    rm -f "$en_exp_tmp" "$en_skill_tmp" 2>/dev/null || :
+    agent_state_lock_release
+    return 1
+  fi
+  en_exp_backup=$(mktemp "$en_store/experiences/$en_id/.exp.normalize-backup.XXXXXX") || {
+    rm -f "$en_exp_tmp" "$en_skill_tmp" 2>/dev/null || :
+    agent_state_lock_release
+    return 1
+  }
+  en_skill_backup=$(mktemp "$en_store/experiences/$en_id/.skill.normalize-backup.XXXXXX") || {
+    rm -f "$en_exp_tmp" "$en_skill_tmp" "$en_exp_backup" 2>/dev/null || :
+    agent_state_lock_release
+    return 1
+  }
+  en_ok=0
+  if cp "$en_exp" "$en_exp_backup" \
+    && cp "$en_skill" "$en_skill_backup" \
+    && mv "$en_skill_tmp" "$en_skill" \
+    && mv "$en_exp_tmp" "$en_exp" \
+    && agent_experience_candidate_ok "$en_store" "$en_id" "$en_started" normalized; then
+    en_ok=1
+  fi
+  if [ "$en_ok" -ne 1 ]; then
+    mv "$en_exp_backup" "$en_exp" 2>/dev/null || :
+    mv "$en_skill_backup" "$en_skill" 2>/dev/null || :
+  fi
+  rm -f "$en_exp_tmp" "$en_skill_tmp" "$en_exp_backup" "$en_skill_backup" \
+    2>/dev/null || :
+  agent_state_lock_release
+  [ "$en_ok" -eq 1 ]
+}
+
+# Execute one verifier in a fresh shell rooted at the launch workspace. A new
+# session for every command prevents `cd` or environment changes in one
+# verifier from making the next verifier pass accidentally.
+agent_run_verifier() {
+  rv_cmd=$1
+  rv_root=$2
+  rv_session=$rv_root/session
+  rv_result=$rv_root/result.txt
+  rv_script=$rv_root/verifier.sh
+  printf '%s\n' "$rv_cmd" > "$rv_script" || return 1
+  if ! rv_syntax=$(/bin/sh -n "$rv_script" 2>&1); then
+    printf 'maintenance: verifier does not parse: %s\n%s\n' \
+      "$rv_cmd" "$rv_syntax" >&2
+    return 1
+  fi
+  SEED_MAINTAIN_VERIFY_SCRIPT=$rv_script
+  export SEED_MAINTAIN_VERIFY_SCRIPT
+  shell_init "$rv_session" "$LAUNCH_CWD"
+  shell_run "$rv_session" '/bin/sh "$SEED_MAINTAIN_VERIFY_SCRIPT"' > "$rv_result"
+  rv_status=$(sed -n '1p' "$rv_session/status" 2>/dev/null || printf '1\n')
+  rv_pid=$(sed -n '1p' "$rv_session/pid" 2>/dev/null || true)
+  shell_stop "$rv_session" 2>/dev/null || :
+  case $rv_pid in ''|*[!0-9]*) ;; *) wait "$rv_pid" 2>/dev/null || : ;; esac
+  unset SEED_MAINTAIN_VERIFY_SCRIPT
+  if [ "$rv_status" = 0 ]; then
+    return 0
+  fi
+  printf 'maintenance: verifier failed (exit %s): %s\n' "$rv_status" "$rv_cmd" >&2
+  sed -n '1,80p' "$rv_result" >&2 || :
+  return 1
+}
+
+# Promote one already-valid candidate. The model never participates in this
+# turn: the runtime snapshots the proposal, executes each exact verifier from
+# the launch workspace, rechecks the unchanged snapshot, writes its own
+# receipt, and commits the synchronized status transition under the state lock.
+agent_maintain_one() {
+  (
+    mo_id=$1
+    mo_started=$2
+    mo_mode=${3:-candidate}
+    mo_store=$INSTALL/agent-store
+    mo_dir=$mo_store/experiences/$mo_id
+    mo_exp=$mo_dir/exp.json
+    mo_skill=$mo_dir/SKILL.md
+    mo_index=$mo_store/experiences/index.json
+    mo_tmp=$(mktemp -d "${TMPDIR:-/tmp}/seed-maintain.XXXXXX") || exit 1
+    mo_locked=0
+    trap 'if [ "$mo_locked" -eq 1 ]; then agent_state_lock_release; fi; rm -rf "$mo_tmp"' EXIT HUP INT TERM
+
+    agent_state_lock_acquire || exit $?
+    mo_locked=1
+    if ! agent_experience_candidate_ok "$mo_store" "$mo_id" "$mo_started" \
+        "$mo_mode"; then
+      printf 'maintenance: invalid candidate: %s\n' "$mo_id" >&2
+      exit 1
+    fi
+    if ! agent_experience_tools_ok "$mo_store" "$mo_id"; then
+      if agent_experience_mark_stale "$mo_store" "$mo_id"; then
+        printf 'maintenance: %s -> stale (required capability unavailable)\n' "$mo_id" >&2
+        agent_state_lock_release
+        mo_locked=0
+        exit 0
+      fi
+      printf 'maintenance: failed to mark %s stale\n' "$mo_id" >&2
+      exit 1
+    fi
+    jq -cS . "$mo_exp" > "$mo_tmp/exp.snapshot" || exit 1
+    cat "$mo_skill" > "$mo_tmp/skill.snapshot" || exit 1
+    jq -cS --arg id "$mo_id" '[.experiences[]? | select(.id == $id)]' \
+      "$mo_index" > "$mo_tmp/row.snapshot" || exit 1
+    jq -r '.verify[]' "$mo_exp" > "$mo_tmp/commands" || exit 1
+    agent_state_lock_release
+    mo_locked=0
+
+    mo_n=0
+    while IFS= read -r mo_cmd; do
+      mo_n=$((mo_n + 1))
+      mkdir -p "$mo_tmp/verify-$mo_n" || exit 1
+      if ! agent_run_verifier "$mo_cmd" "$mo_tmp/verify-$mo_n"; then
+        printf 'maintenance: %s remains candidate\n' "$mo_id" >&2
+        exit 1
+      fi
+      printf '%s\n' "$mo_cmd" >> "$mo_tmp/verified-commands"
+    done < "$mo_tmp/commands"
+    [ "$mo_n" -gt 0 ] || exit 1
+
+    agent_state_lock_acquire || exit $?
+    mo_locked=1
+    if ! agent_experience_candidate_ok "$mo_store" "$mo_id" "$mo_started" \
+        "$mo_mode" \
+      || ! agent_experience_tools_ok "$mo_store" "$mo_id"; then
+      printf 'maintenance: candidate changed during verification: %s\n' "$mo_id" >&2
+      exit 1
+    fi
+    jq -cS . "$mo_exp" > "$mo_tmp/exp.current" || exit 1
+    jq -cS --arg id "$mo_id" '[.experiences[]? | select(.id == $id)]' \
+      "$mo_index" > "$mo_tmp/row.current" || exit 1
+    if ! cmp -s "$mo_tmp/exp.snapshot" "$mo_tmp/exp.current" \
+      || ! cmp -s "$mo_tmp/skill.snapshot" "$mo_skill" \
+      || ! cmp -s "$mo_tmp/row.snapshot" "$mo_tmp/row.current"; then
+      printf 'maintenance: candidate changed during verification: %s\n' "$mo_id" >&2
+      exit 1
+    fi
+
+    mo_verified=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+    if ! jq -e --arg now "$mo_verified" '.created_at < $now' "$mo_exp" \
+        >/dev/null 2>&1; then
+      printf 'maintenance: verification time is not later than candidate: %s\n' "$mo_id" >&2
+      exit 1
+    fi
+    mo_stamp=$(printf '%s' "$mo_verified" | tr -d ':-')
+    mo_seq=0
+    while :; do
+      mo_rel=agent-store/runs/maintain-$mo_stamp-$$-$mo_id-$mo_seq.jsonl
+      mo_evidence=$INSTALL/$mo_rel
+      [ -e "$mo_evidence" ] || break
+      mo_seq=$((mo_seq + 1))
+    done
+    mo_evidence_tmp=$(mktemp "$mo_store/runs/.maintain.XXXXXX") || exit 1
+    while IFS= read -r mo_cmd; do
+      jq -nc --arg utc "$mo_verified" --arg cmd "$mo_cmd" --arg id "$mo_id" \
+        --arg started "$mo_started" \
+        '{utc:$utc,cmd:$cmd,exit:0,note:"runtime maintenance verification",
+          exp_id:$id,authority:"seed-runtime",cwd:"launch-workspace",
+          maintain_started:$started}' >> "$mo_evidence_tmp" || exit 1
+    done < "$mo_tmp/verified-commands"
+    if ! jq -s -e --arg id "$mo_id" --arg now "$mo_verified" \
+        --arg started "$mo_started" '
+          length > 0 and all(.[];
+            .exp_id == $id and .exit == 0 and .utc == $now
+            and .authority == "seed-runtime" and .cwd == "launch-workspace"
+            and .maintain_started == $started)
+        ' "$mo_evidence_tmp" >/dev/null 2>&1 \
+      || ! mv "$mo_evidence_tmp" "$mo_evidence"; then
+      rm -f "$mo_evidence_tmp" 2>/dev/null || :
+      exit 1
+    fi
+
+    mo_exp_tmp=$(mktemp "$mo_dir/.exp.promote.XXXXXX") || exit 1
+    mo_index_tmp=$(mktemp "$mo_store/experiences/.index.promote.XXXXXX") || exit 1
+    if ! jq --arg now "$mo_verified" --arg ev "$mo_rel" '
+        .status = "active"
+        | .successes = (if .successes < 1 then 1 else .successes end)
+        | .last_verified = $now
+        | .evidence = ((.evidence + [$ev]) | unique)
+      ' "$mo_exp" > "$mo_exp_tmp" 2>/dev/null; then
+      exit 1
+    fi
+    mo_row=$(jq -c '{id,title,status,version,scope,applies_if,path:.id}' "$mo_exp_tmp") \
+      || exit 1
+    if ! jq --arg id "$mo_id" --argjson row "$mo_row" '
+        .experiences |= map(if .id == $id then $row else . end)
+      ' "$mo_index" > "$mo_index_tmp" 2>/dev/null; then
+      exit 1
+    fi
+    mo_exp_backup=$(mktemp "$mo_dir/.exp.rollback.XXXXXX") || exit 1
+    mo_index_backup=$(mktemp "$mo_store/experiences/.index.rollback.XXXXXX") || exit 1
+    cp "$mo_exp" "$mo_exp_backup" || exit 1
+    cp "$mo_index" "$mo_index_backup" || exit 1
+    mo_committed=0
+    if mv "$mo_exp_tmp" "$mo_exp" \
+      && mv "$mo_index_tmp" "$mo_index" \
+      && agent_experience_record_ok "$mo_store" "$mo_id"; then
+      mo_committed=1
+    fi
+    if [ "$mo_committed" -ne 1 ]; then
+      mv "$mo_exp_backup" "$mo_exp" 2>/dev/null || :
+      mv "$mo_index_backup" "$mo_index" 2>/dev/null || :
+      printf 'maintenance: promotion transaction rolled back: %s\n' "$mo_id" >&2
+      exit 1
+    fi
+    rm -f "$mo_exp_backup" "$mo_index_backup" 2>/dev/null || :
+    agent_state_lock_release
+    mo_locked=0
+    printf 'maintained: %s active\n' "$mo_id" >&2
+  )
+}
+
+agent_maintain_experiences() {
+  if [ "${SEED_RUN_MODE:-agent}" != agent ]; then
+    printf 'error: maintenance needs Agent mode\n' >&2
+    return 64
+  fi
+  ma_store=$INSTALL/agent-store
+  ma_root=$ma_store/experiences
+  ma_started=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+  ma_seen=0
+  ma_failed=0
+  if [ -d "$ma_root" ] && [ ! -L "$ma_root" ]; then
+    for ma_exp in "$ma_root"/*/exp.json; do
+      [ -e "$ma_exp" ] || [ -L "$ma_exp" ] || continue
+      ma_id=${ma_exp%/exp.json}
+      ma_id=${ma_id##*/}
+      ma_status=$(jq -r '.status // empty' "$ma_exp" 2>/dev/null || true)
+      case $ma_status in
+        candidate)
+          ma_seen=$((ma_seen + 1))
+          if agent_experience_normalize_candidate "$ma_store" "$ma_id" \
+              "$ma_started"; then
+            agent_maintain_one "$ma_id" "$ma_started" normalized || ma_failed=1
+          else
+            printf 'maintenance: invalid candidate: %s\n' "$ma_id" >&2
+            ma_failed=1
+          fi
+          ;;
+        active|degraded)
+          ma_seen=$((ma_seen + 1))
+          if ! agent_experience_record_ok "$ma_store" "$ma_id"; then
+            if agent_experience_candidate_ok "$ma_store" "$ma_id" \
+                "$ma_started" legacy \
+              && agent_experience_requeue_legacy "$ma_store" "$ma_id" \
+                "$ma_started" \
+              && agent_experience_normalize_candidate "$ma_store" "$ma_id" \
+                "$ma_started"; then
+              printf 'maintenance: re-verifying legacy record: %s\n' "$ma_id" >&2
+              agent_maintain_one "$ma_id" "$ma_started" normalized || ma_failed=1
+            else
+              printf 'maintenance: invalid unpublished %s record: %s\n' \
+                "$ma_status" "$ma_id" >&2
+              ma_failed=1
+            fi
+          elif ! agent_experience_tools_ok "$ma_store" "$ma_id"; then
+            if agent_experience_mark_stale "$ma_store" "$ma_id"; then
+              printf 'maintenance: %s -> stale (required capability unavailable)\n' \
+                "$ma_id" >&2
+            else
+              ma_failed=1
+            fi
+          fi
+          ;;
+        '')
+          ma_seen=$((ma_seen + 1))
+          printf 'maintenance: invalid experience record: %s\n' "$ma_id" >&2
+          ma_failed=1
+          ;;
+      esac
+    done
+  elif [ -e "$ma_root" ] || [ -L "$ma_root" ]; then
+    printf 'maintenance: invalid experience store\n' >&2
+    return 1
+  fi
+  if ! agent_sync_experience_skills; then
+    printf 'maintenance: skill publication failed\n' >&2
+    ma_failed=1
+  fi
+  [ "$ma_seen" -gt 0 ] || printf 'maintenance: no live experiences\n' >&2
+  [ "$ma_failed" -eq 0 ]
+}
+
+# This is the runtime publication gate. The model may propose lifecycle state,
+# but active/degraded rows are invisible unless their complete record, skill,
+# non-trivial verifier list, synchronized catalog row, and successful evidence
+# all agree. It does not execute arbitrary verifier commands during prompt
+# construction.
+agent_experience_record_ok() {
+  er_store=$1
+  er_id=$2
+  agent_experience_id_ok "$er_id" || return 1
+  er_dir=$er_store/experiences/$er_id
+  er_exp=$er_dir/exp.json
+  er_skill=$er_dir/SKILL.md
+  er_index=$er_store/experiences/index.json
+  [ -d "$er_store" ] && [ ! -L "$er_store" ] || return 1
+  [ -d "$er_store/experiences" ] && [ ! -L "$er_store/experiences" ] || return 1
+  [ -d "$er_dir" ] && [ ! -L "$er_dir" ] || return 1
+  [ -f "$er_exp" ] && [ ! -L "$er_exp" ] || return 1
+  [ -f "$er_skill" ] && [ ! -L "$er_skill" ] || return 1
+  [ -f "$er_index" ] && [ ! -L "$er_index" ] || return 1
+  [ -d "$er_store/runs" ] && [ ! -L "$er_store/runs" ] || return 1
+  er_title=$(jq -er '.title | select(type == "string")' "$er_exp" 2>/dev/null) \
+    || return 1
+  agent_skill_file_ok "$er_skill" "$er_id" "$er_title" || return 1
+  jq -Rs -e 'test("[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]") | not' \
+    "$er_skill" >/dev/null 2>&1 || return 1
+  jq -e --arg id "$er_id" '
+    def string_array: type == "array" and all(.[]; type == "string");
+    def utc: type == "string" and test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$");
+    def noop:
+      ascii_downcase | gsub("^[[:space:]]+|[[:space:]]+$"; "")
+      | . == "true" or . == ":" or . == "exit 0" or startswith("echo ");
+    type == "object"
+    and ([.. | strings
+          | select(test("[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]"))]
+         | length) == 0
+    and keys == ["applies_if","created_at","evidence","failures","id","kind",
+                 "last_verified","preconditions","quarantine_reason","scope",
+                 "status","successes","supersedes","title","verify","version"]
+    and .id == $id
+    and .kind == "procedure"
+    and (.title | type == "string" and length > 0 and (contains("\n") | not))
+    and (.status == "active" or .status == "degraded")
+    and (.version | type == "number" and floor == . and . >= 1)
+    and (.scope | type == "object")
+    and (.scope | keys) == ["os","task_kinds","tools"]
+    and (.scope.os | string_array and all(.[]; . == ascii_downcase))
+    and (.scope.tools | string_array)
+    and (.scope.task_kinds | string_array)
+    and (.applies_if | string_array)
+    and (.preconditions | string_array)
+    and (.verify | string_array and length > 0
+         and all(.[]; length > 0 and (contains("\n") | not) and (noop | not)))
+    and (.evidence | string_array and length > 0
+         and all(.[]; test("^agent-store/runs/[A-Za-z0-9][A-Za-z0-9._-]*[.]jsonl$")))
+    and (.successes | type == "number" and floor == . and . >= 1)
+    and (.failures | type == "number" and floor == . and . >= 0)
+    and (.created_at | utc)
+    and (.last_verified | utc)
+    and .last_verified > .created_at
+    and (.supersedes | type == "string")
+    and (.quarantine_reason | type == "string")
+  ' "$er_exp" >/dev/null 2>&1 || return 1
+
+  # The metadata row must describe exactly this record and contain only an
+  # in-store path representation.
+  jq -e --slurpfile e "$er_exp" --arg id "$er_id" --arg store "$er_store" '
+    [.experiences[]? | select(.id == $id)] as $rows
+    | ($rows | length) == 1
+      and $rows[0].title == $e[0].title
+      and $rows[0].status == $e[0].status
+      and $rows[0].version == $e[0].version
+      and $rows[0].scope == $e[0].scope
+      and $rows[0].applies_if == $e[0].applies_if
+      and ($rows[0].path == $id
+           or $rows[0].path == ("agent-store/experiences/" + $id)
+           or $rows[0].path == ($store + "/experiences/" + $id))
+  ' "$er_index" >/dev/null 2>&1 || return 1
+
+  # Every declared verifier needs an exact successful evidence event for this
+  # experience. Evidence is still auditable text, but publication cannot pass
+  # on an empty list or a bare `true` command anymore.
+  if ! jq -r '.verify[]' "$er_exp" | while IFS= read -r er_cmd; do
+    er_hit=0
+    for er_rel in $(jq -r '.evidence[]' "$er_exp"); do
+      er_file=$INSTALL/$er_rel
+      [ -f "$er_file" ] && [ ! -L "$er_file" ] || continue
+      if jq -s -e --slurpfile e "$er_exp" --arg id "$er_id" --arg cmd "$er_cmd" \
+          'def utc: type == "string"
+             and test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$");
+           any(.[];
+             type == "object" and .exp_id == $id and .cmd == $cmd
+             and .exit == 0 and (.utc | utc) and .utc == $e[0].last_verified
+             and (.note | type == "string")
+             and .authority == "seed-runtime"
+             and .cwd == "launch-workspace"
+             and (.maintain_started | utc)
+             and .maintain_started > $e[0].created_at
+             and .maintain_started <= .utc
+             and (.note | test("[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]") | not))' \
+          "$er_file" >/dev/null 2>&1; then
+        er_hit=1
+        break
+      fi
+    done
+    [ "$er_hit" -eq 1 ] || exit 1
+  done; then
+    return 1
+  fi
+  return 0
+}
+
+# The experience -> skill bridge owns publication. The catalog renderer later
+# applies scope, status, English keyword matching, ranking, and the top-3 cap,
+# so there is one retrieval funnel rather than a second global activation path.
+agent_sync_experience_skills() {
+  sx_store=$INSTALL/agent-store
+  sx_exp=$sx_store/experiences/index.json
+  sx_idx=$sx_store/index.json
+  [ -f "$sx_exp" ] || return 0
+  [ -f "$sx_idx" ] || return 0
+  [ ! -L "$sx_exp" ] && [ ! -L "$sx_idx" ] || return 1
+  agent_state_lock_acquire || return $?
+  sx_ok=$(jq -r '.experiences[]?
+      | select(.status == "active" or .status == "degraded")
+      | .id // empty' "$sx_exp" 2>/dev/null \
+    | while IFS= read -r sx_id; do
+        agent_experience_record_ok "$sx_store" "$sx_id" && printf '%s\n' "$sx_id"
+        :
+      done)
+  sx_tmp=$(mktemp "$sx_store/.index.skills.XXXXXX") || {
+    agent_state_lock_release
+    return 1
+  }
+  if jq --slurpfile x "$sx_exp" --arg store "$sx_store" --arg okids "$sx_ok" '
+      ($okids | split("\n") | map(select(length > 0))) as $valid
+      | [ $x[0].experiences[]? | select((.id // "") != "") ] as $rows
+      | [ (.agent.skills // [])[]
+          | select((.source // "") != "experience"
+                   and (((.note // "") | startswith("experience ")) | not))
+          | .name ] as $reserved
+      | [ $rows[]
+          | select(.status == "active" or .status == "degraded")
+          | .id as $i
+          | select(($valid | index($i)) != null and ($reserved | index($i)) == null)
+          | {name: $i,
+             description: (.title // ""),
+             path: ($store + "/experiences/" + $i + "/SKILL.md"),
+             ok: true,
+             source: "experience",
+             status: .status,
+             scope: .scope,
+             applies_if: .applies_if,
+             note: ("experience " + (.status // ""))} ] as $live
+      | [ $rows[]
+          | .id
+          | . as $id
+          | select(($live | map(.name) | index($id)) == null) ] as $dead
+      | if (type != "object") then .
+        else
+          .agent.skills = (
+            ((.agent.skills // [])
+             | map(.name as $n | select(($live | map(.name) | index($n)) == null)))
+            + $live)
+          | .agent.skills = (.agent.skills
+            | map(.name as $n
+                  | if (($dead | index($n)) != null)
+                       and ((.source // "") == "experience"
+                            or ((.note // "") | startswith("experience")))
+                    then .ok = false else . end))
+        end
+    ' "$sx_idx" > "$sx_tmp" 2>/dev/null && mv "$sx_tmp" "$sx_idx"; then
+    agent_state_lock_release
+    return 0
+  else
+    rm -f "$sx_tmp"
+    agent_state_lock_release
+    return 1
+  fi
+}
+
+# Provenance: a run's evidence says which run spawned it and what role it
+# plays, so nested seed invocations (a run launching `seed --oneshot` through
+# the shell tool) form a chain like the Unix process tree. run.json is the
+# record; run-env plus the exports hand this run's id to any child process.
+run_provenance() {
+  evd=$1
+  ses=$2
+  # Snapshot the incoming provenance once per process: the exports below
+  # overwrite the live variables, and later runs in the same process must
+  # still see what this process was invoked with.
+  if [ "${SEED_PROV_SNAP:-}" != 1 ]; then
+    SEED_PROV_PARENT=${SEED_PARENT_RUN_ID:-root}
+    SEED_PROV_ROLE_IN=${SEED_RUN_ROLE:-}
+    SEED_PROV_SNAP=1
+  fi
+  prov_role=$SEED_PROV_ROLE_IN
+  if [ -z "$prov_role" ]; then
+    if [ "$SEED_PROV_PARENT" = root ]; then prov_role=main; else prov_role=subagent; fi
+  fi
+  run_id=${evd##*/}
+  printf '{"run_id":"%s","parent_run_id":"%s","role":"%s"}\n' \
+    "$run_id" "$SEED_PROV_PARENT" "$prov_role" > "$evd/run.json"
+  printf 'SEED_PARENT_RUN_ID=%s\nSEED_RUN_ROLE=subagent\nexport SEED_PARENT_RUN_ID SEED_RUN_ROLE\n' \
+    "$run_id" > "$ses/run-env.tmp"
+  mv "$ses/run-env.tmp" "$ses/run-env"
+  export SEED_PARENT_RUN_ID="$run_id"
+  export SEED_RUN_ROLE=subagent
 }
 
 agent_run_init() {
@@ -1357,9 +2590,10 @@ agent_run_init() {
   sess=$ev/session
   mkdir -p "$ev"
   shell_init "$sess" "$PWD"
+  run_provenance "$ev" "$sess"
   INIT_STOP_WHEN_READY=1
   export INIT_STOP_WHEN_READY
-  run_loop "$(product_system)" "$prompt" "$sess" "$ev" "$AGENT_MAX_ROUNDS" 0 || :
+  run_loop "$(product_system '')" "$prompt" "$sess" "$ev" "$AGENT_MAX_ROUNDS" 0 || :
   unset INIT_STOP_WHEN_READY
   shell_stop "$sess" 2>/dev/null || :
   agent_repair_machine_tree || true
@@ -1367,39 +2601,118 @@ agent_run_init() {
 
 agent_ensure_init() {
   [ "${SLAB_SKIP_INIT:-}" = 1 ] && return 0
-  agent_repair_machine_tree || true
+  if [ -f "$INSTALL/agent-store/index.json" ]; then
+    agent_migrate_index_v2 || die "machine index migration failed" 76
+  fi
+  agent_ensure_project_memory || die "project memory initialization failed" 76
+  # A cached v1 init pack can otherwise overwrite the version label and
+  # namespaces that migration just repaired. Validate or refresh policy before
+  # using its template against an existing machine index.
+  if [ -f "$INSTALL/agent-store/index.json" ]; then
+    agent_fetch_required
+    agent_repair_machine_tree || die "machine index repair failed" 76
+  fi
   if agent_check_machine_tree; then
     agent_try_update
-    agent_probe_tools
+    agent_bootstrap_machine
     agent_discard_baseline
     return 0
   fi
   if agent_restore_baseline; then
-    agent_probe_tools
+    agent_bootstrap_machine
     return 0
   fi
   printf 'initializing:\n' >&2
   agent_fetch_required
-  agent_place_trees
-  agent_probe_tools
+  agent_place_trees || die "agent state initialization failed" 76
+  agent_bootstrap_machine
   agent_write_baseline || die "init failed" 76
   SEED_STREAM=1
   SEED_STREAM_PRINT=1
   export SEED_STREAM SEED_STREAM_PRINT
   agent_run_init
   agent_repair_machine_tree || true
-  agent_probe_tools
+  agent_bootstrap_machine
   if agent_check_machine_tree; then
     agent_discard_baseline
     printf 'ready\n' >&2
     return 0
   fi
   if agent_restore_baseline; then
+    # The baseline intentionally contains only prerequisite results. Rebuild
+    # runtime-observed identity after restoring it so `ready` never describes
+    # a machine tree with an empty OS, kernel, PATH, or scan inventory.
+    agent_bootstrap_machine
+    agent_check_machine_tree || die "init failed" 76
     printf 'note: optional discovery skipped\n' >&2
     printf 'ready\n' >&2
     return 0
   fi
   die "init failed" 76
+}
+
+# Optional packs (memory, ...) land on demand through the runtime. If an
+# explicit opt-in catalog refresh moves, refresh only optional packs already
+# installed; never let an optional fetch abort the update.
+agent_update_optional() {
+  uo_index=$1
+  uo_store=$INSTALL/agent-store
+  uo_root=$(pack_root)
+  for uo_name in $(printf '%s' "$uo_index" | jq -r '(.optional // {}) | keys[]?'); do
+    uo_dest=$uo_store/packs/$uo_name.json
+    [ -f "$uo_dest" ] || continue
+    uo_rel=$(printf '%s' "$uo_index" | jq -r --arg n "$uo_name" '.optional[$n] // empty')
+    [ -n "$uo_rel" ] || continue
+    uo_tmp=$(mktemp "$uo_store/packs/.optional.XXXXXX") || continue
+    if http_get "$(pack_join "$uo_root/agent" "$uo_rel")" "$uo_tmp" \
+      && jq -e 'type == "object" and (.prompt | type) == "string"' \
+        "$uo_tmp" >/dev/null 2>&1; then
+      if agent_state_lock_acquire; then
+        mv "$uo_tmp" "$uo_dest" || rm -f "$uo_tmp" 2>/dev/null || :
+        agent_state_lock_release
+      else
+        rm -f "$uo_tmp"
+      fi
+    else
+      rm -f "$uo_tmp"
+    fi
+  done
+}
+
+# Fetch one catalog-declared optional policy pack before the first task that
+# may need it. The model never curls prompt policy itself. A failed optional
+# fetch is non-fatal and leaves any existing copy untouched.
+agent_ensure_optional_pack() {
+  eo_name=$1
+  eo_store=$INSTALL/agent-store
+  eo_dest=$eo_store/packs/$eo_name.json
+  [ -f "$eo_dest" ] \
+    && jq -e 'type == "object" and (.prompt | type) == "string"' \
+      "$eo_dest" >/dev/null 2>&1 && return 0
+  eo_catalog=$eo_store/catalog.json
+  [ -f "$eo_catalog" ] || return 1
+  eo_rel=$(jq -r --arg n "$eo_name" '.optional[$n] // empty' "$eo_catalog" 2>/dev/null)
+  [ -n "$eo_rel" ] || return 1
+  mkdir -p "$eo_store/packs" || return 1
+  eo_tmp=$(mktemp "$eo_store/packs/.optional.XXXXXX") || return 1
+  if ! http_get "$(pack_join "$(pack_root)/agent" "$eo_rel")" "$eo_tmp" \
+    || ! jq -e 'type == "object" and (.prompt | type) == "string"' \
+      "$eo_tmp" >/dev/null 2>&1; then
+    rm -f "$eo_tmp"
+    return 1
+  fi
+  agent_state_lock_acquire || { rm -f "$eo_tmp"; return 75; }
+  eo_status=0
+  if [ -f "$eo_dest" ] \
+    && jq -e 'type == "object" and (.prompt | type) == "string"' \
+      "$eo_dest" >/dev/null 2>&1; then
+    rm -f "$eo_tmp" 2>/dev/null || :
+  else
+    mv "$eo_tmp" "$eo_dest" || eo_status=$?
+  fi
+  [ "$eo_status" -eq 0 ] || rm -f "$eo_tmp" 2>/dev/null || :
+  agent_state_lock_release
+  [ "$eo_status" -eq 0 ] || return "$eo_status"
 }
 
 agent_update() {
@@ -1419,16 +2732,26 @@ agent_update() {
   if [ "$nv" = "$ov" ] && [ "$nu" = "$ou" ]; then
     return 0
   fi
-  agent_fetch_pack 0 "$index"
+  agent_fetch_pack "$index"
+  agent_update_optional "$index"
   if [ -f "$store/index.json" ]; then
     nr=$(jq -r '.machine_tree.system.retrieve // empty' "$store/packs/init.json")
     if [ -n "$nr" ]; then
-      tmpi2=$(mktemp "${TMPDIR:-/tmp}/seed-uret.XXXXXX")
-      jq --arg r "$nr" '
+      agent_state_lock_acquire || return $?
+      tmpi2=$(mktemp "$store/.index.retrieve.XXXXXX") || {
+        agent_state_lock_release
+        return 1
+      }
+      if jq --arg r "$nr" '
         .system.retrieve=$r
         | if .system["web"] then .system["web"] |= with_entries(select(.key == "fetch")) else . end
-      ' "$store/index.json" > "$tmpi2"
-      mv "$tmpi2" "$store/index.json"
+      ' "$store/index.json" > "$tmpi2" && mv "$tmpi2" "$store/index.json"; then
+        agent_state_lock_release
+      else
+        rm -f "$tmpi2"
+        agent_state_lock_release
+        return 1
+      fi
     fi
   fi
 }
@@ -1444,6 +2767,7 @@ seed_help() {
     'seed: type a task to work in the launch directory.' \
     '/help                 show this help' \
     '/ini                  install the global command seed' \
+    '/maintain             verify and reconcile experience memory' \
     '/packs                list published packs' \
     '/packs install <slug> install a published pack' \
     '/pack <slug>          alias for /packs install' \
@@ -1642,7 +2966,7 @@ seed_prepare_state() {
   state=$(seed_state_root)
   mkdir -p "$state"
   INSTALL=$(CDPATH= cd "$state" && pwd -P)
-  export SEED_HOME=$INSTALL
+  export SEED_HOME="$INSTALL"
   seed_bind_self
   export SEED_SELF
 }
@@ -1846,8 +3170,22 @@ seed_cli_slash() {
   shift
   for a in "$@"; do cmd="$cmd $a"; done
   seed_prepare_state
+  if [ "$cmd" = /ini ]; then
+    seed_install_global
+    return $?
+  fi
+  ensure_jq
   seed_resolve_mode
-  seed_pack_cmd "$cmd"
+  if [ "$cmd" = /maintain ]; then
+    [ "$SEED_RUN_MODE" = agent ] || {
+      printf 'error: maintenance needs Agent mode\n' >&2
+      return 64
+    }
+    agent_ensure_init
+    agent_maintain_experiences
+  else
+    seed_pack_cmd "$cmd"
+  fi
 }
 
 seed_probe() {
@@ -1860,6 +3198,7 @@ seed_probe() {
   printf 'seed.version=%s\n' "$SEED_VERSION"
   printf 'seed.state=%s\n' "$state"
   printf 'seed.workspace=%s\n' "$LAUNCH_CWD"
+  printf 'seed.content=%s\n' "$(seed_content_id "$SELF")"
 }
 
 seed_save_config() {
@@ -1901,36 +3240,44 @@ seed_load_or_activate() {
   disable_thinking
 }
 
-seed_install_prompt() {
-  receipt=$INSTALL/install-result.json
-  cat <<EOF
-Install this already-running standalone seed runtime as a global command named seed.
+seed_content_id() {
+  sc_file=$1
+  cksum "$sc_file" 2>/dev/null | awk '{print $1 "-" $2}'
+}
 
-This is an explicitly authorized installation operation. Inspect the live POSIX environment and PATH with the shell tool. Choose a user-owned, writable installation method appropriate to the environment. You may copy the runtime, make a symbolic link, or create a tiny POSIX /bin/sh shim. Do not use sudo, do not modify another seed installation, and never read or print API keys or .env files.
+seed_runtime_source() {
+  if seed_runtime_ok "$SELF"; then
+    printf '%s\n' "$SELF"
+  elif seed_runtime_ok "$INSTALL/.seed-runtime.sh"; then
+    printf '%s\n' "$INSTALL/.seed-runtime.sh"
+  else
+    return 1
+  fi
+}
 
-Runtime source: $SELF
-State directory: $INSTALL
-Required receipt: $receipt
-Stable original launch PATH: $SEED_LAUNCH_PATH
-Current internal runtime PATH: $PATH
-
-Only the stable original launch PATH is accepted as proof that the command remains reachable after this seed process exits. The runtime may have temporarily prepended directories such as the state directory's bin subdirectory solely to host dependencies. Do not install seed into a directory found only in the current internal runtime PATH. A future-login-only profile change is not enough unless reachability can be proven now through the stable original launch PATH.
-
-Before finishing, use the shell tool to write the receipt as one JSON object with exactly these required string fields (extra fields are allowed):
-  {"command":"seed","entry":"/absolute/path/to/the/executable-entry"}
-Before you write the receipt, run the command itself under the stable original launch PATH and confirm it answers; the outer runtime will not tell you why it rejected an install, so an untested one is a coin flip. The entry must be executable and must actually run: a symbolic link to a file that has no execute bit is neither, and a /bin/sh shim that calls the runtime by path avoids the question entirely. The entry must be exactly the string that command -v seed prints under the stable original launch PATH: the PATH entry itself. If you installed a symbolic link, that is the link's own path, not the path it points at. Do not claim success unless the files and receipt exist. The outer runtime will independently validate everything after this turn.
-EOF
+# Select an existing directory from the caller's original PATH. It must be
+# writable and owned by the current user; /ini never edits a shell profile or
+# invents a future-login-only PATH entry.
+seed_find_install_dir() {
+  ( IFS=:
+    si_user=$(id -un 2>/dev/null || true)
+    [ -n "$si_user" ] || exit 1
+    for si_dir in $SEED_LAUNCH_PATH; do
+      [ -n "$si_dir" ] || continue
+      [ -d "$si_dir" ] && [ -w "$si_dir" ] || continue
+      si_dir=$(CDPATH= cd "$si_dir" 2>/dev/null && pwd -P) || continue
+      si_owned=$(find "$si_dir" -prune -user "$si_user" -print 2>/dev/null || true)
+      [ "$si_owned" = "$si_dir" ] || continue
+      printf '%s\n' "$si_dir"
+      exit 0
+    done
+    exit 1 )
 }
 
 seed_validate_install() {
-  receipt=$INSTALL/install-result.json
-  [ -f "$receipt" ] || { printf 'error: install receipt missing\n' >&2; return 76; }
-  if ! jq -e '.command == "seed" and (.entry | type == "string") and (.entry | length > 1)' \
-      "$receipt" >/dev/null 2>&1; then
-    printf 'error: install receipt invalid\n' >&2
-    return 76
-  fi
-  entry=$(jq -r '.entry' "$receipt")
+  entry=$1
+  source=$2
+  content=$3
   case $entry in
     /*) ;;
     *) printf 'error: install entry is not absolute\n' >&2; return 76 ;;
@@ -1946,19 +3293,24 @@ seed_validate_install() {
     printf 'error: install entry is not executable\n' >&2
     return 76
   }
-  resolved=$(PATH=$SEED_LAUNCH_PATH command -v seed 2>/dev/null || true)
-  [ "$resolved" = "$entry" ] || {
-    printf 'error: installed seed is not the PATH entry\n' >&2
+  cmp -s "$source" "$entry" || {
+    printf 'error: install entry content mismatch\n' >&2
     return 76
   }
-  first=$(sed -n '1p' "$entry" 2>/dev/null || true)
-  case $first in
-    '#!'*sh*)
-      /bin/sh -n "$entry" >/dev/null 2>&1 || {
-        printf 'error: install entry failed syntax check\n' >&2
-        return 76
-      } ;;
-  esac
+  resolved=$(PATH=$SEED_LAUNCH_PATH command -v seed 2>/dev/null || true)
+  if [ -n "$resolved" ]; then
+    resolved_dir=$(CDPATH= cd "$(dirname "$resolved")" 2>/dev/null && pwd -P) || resolved_dir=
+    [ -n "$resolved_dir" ] && resolved=$resolved_dir/$(basename "$resolved")
+  fi
+  [ "$resolved" = "$entry" ] || {
+    printf 'error: installed seed is not the PATH entry (resolved=%s expected=%s)\n' \
+      "$resolved" "$entry" >&2
+    return 76
+  }
+  /bin/sh -n "$entry" >/dev/null 2>&1 || {
+    printf 'error: install entry failed syntax check\n' >&2
+    return 76
+  }
   probe=$(PATH=$SEED_LAUNCH_PATH SEED_HOME=$INSTALL "$resolved" --probe 2>/dev/null) || {
     printf 'error: install entry probe failed\n' >&2
     return 76
@@ -1975,26 +3327,142 @@ seed_validate_install() {
     printf 'error: install entry state mismatch\n' >&2
     return 76
   }
-  printf 'installed: %s\n' "$entry" >&2
+  printf '%s\n' "$probe" | grep -qxF "seed.workspace=$LAUNCH_CWD" || {
+    printf 'error: install entry workspace mismatch\n' >&2
+    return 76
+  }
+  printf '%s\n' "$probe" | grep -qxF "seed.content=$content" || {
+    printf 'error: install entry content identity mismatch\n' >&2
+    return 76
+  }
+  return 0
 }
 
 seed_install_global() {
-  ev=${AGENT_RUNS_DIR:-$PWD/.agent-runs}/$(date -u +%Y%m%dT%H%M%SZ)-$$-ini
-  sess=$ev/session
-  mkdir -p "$ev"
-  rm -f "$INSTALL/install-result.json"
-  shell_init "$sess" "$PWD"
-  is=0
-  run_loop "$(product_system)" "$(seed_install_prompt)" "$sess" "$ev" "$AGENT_MAX_ROUNDS" 0 || is=$?
-  shell_stop "$sess" 2>/dev/null || :
-  [ "$is" -eq 0 ] || { printf 'error: global install model turn failed\n' >&2; return "$is"; }
-  seed_validate_install
+  command -v jq >/dev/null 2>&1 || {
+    printf 'error: /ini requires an existing jq; no download was attempted\n' >&2
+    return 69
+  }
+  si_source=$(seed_runtime_source) || {
+    printf 'error: current seed runtime is not materialized\n' >&2
+    return 76
+  }
+  si_content=$(seed_content_id "$si_source")
+  [ -n "$si_content" ] || {
+    printf 'error: cannot identify current seed runtime\n' >&2
+    return 76
+  }
+
+  si_existing=$(PATH=$SEED_LAUNCH_PATH command -v seed 2>/dev/null || true)
+  if [ -n "$si_existing" ]; then
+    if seed_validate_install "$si_existing" "$si_source" "$si_content"; then
+      printf 'installed: %s\n' "$si_existing" >&2
+      return 0
+    fi
+    printf 'error: refusing to overwrite existing seed command: %s\n' "$si_existing" >&2
+    return 76
+  fi
+
+  si_dir=$(seed_find_install_dir) || {
+    printf 'error: no user-owned writable directory exists on the launch PATH\n' >&2
+    return 76
+  }
+  si_entry=$si_dir/seed
+  si_runtimes=$INSTALL/runtimes
+  si_runtime=$si_runtimes/seed-$si_content.sh
+  si_created_runtime=0
+  si_created_entry=0
+  mkdir -p "$si_runtimes" || return 76
+
+  if [ -e "$si_runtime" ]; then
+    cmp -s "$si_source" "$si_runtime" || {
+      printf 'error: runtime content-id collision\n' >&2
+      return 76
+    }
+  else
+    si_tmp=$(mktemp "$si_runtimes/.seed.XXXXXX") || return 76
+    if ! cp "$si_source" "$si_tmp" || ! chmod 700 "$si_tmp" \
+      || ! /bin/sh -n "$si_tmp" >/dev/null 2>&1; then
+      rm -f "$si_tmp" 2>/dev/null || :
+      printf 'error: failed to stage seed runtime\n' >&2
+      return 76
+    fi
+    if ln "$si_tmp" "$si_runtime" 2>/dev/null; then
+      si_created_runtime=1
+    elif ! cmp -s "$si_tmp" "$si_runtime"; then
+      rm -f "$si_tmp" 2>/dev/null || :
+      printf 'error: failed to publish seed runtime\n' >&2
+      return 76
+    fi
+    rm -f "$si_tmp" 2>/dev/null || :
+  fi
+
+  if [ "${SEED_TEST_INSTALL_FAIL_AFTER_RUNTIME:-}" = 1 ]; then
+    [ "$si_created_runtime" -eq 0 ] || rm -f "$si_runtime" 2>/dev/null || :
+    printf 'error: install transaction rolled back (simulated install failure)\n' >&2
+    return 76
+  fi
+
+  if ln -s "$si_runtime" "$si_entry" 2>/dev/null; then
+    si_created_entry=1
+  else
+    [ "$si_created_runtime" -eq 0 ] || rm -f "$si_runtime" 2>/dev/null || :
+    printf 'error: install transaction rolled back (entry appeared concurrently)\n' >&2
+    return 76
+  fi
+
+  if ! seed_validate_install "$si_entry" "$si_source" "$si_content"; then
+    if [ "$si_created_entry" -eq 1 ] && [ -L "$si_entry" ] \
+      && cmp -s "$si_runtime" "$si_entry"; then
+      rm -f "$si_entry" 2>/dev/null || :
+    fi
+    [ "$si_created_runtime" -eq 0 ] || rm -f "$si_runtime" 2>/dev/null || :
+    printf 'error: install transaction rolled back\n' >&2
+    return 76
+  fi
+
+  if [ "${SEED_TEST_INSTALL_FAIL_AFTER_ENTRY:-}" = 1 ]; then
+    if [ "$si_created_entry" -eq 1 ] && [ -L "$si_entry" ] \
+      && cmp -s "$si_runtime" "$si_entry"; then
+      rm -f "$si_entry" 2>/dev/null || :
+    fi
+    [ "$si_created_runtime" -eq 0 ] || rm -f "$si_runtime" 2>/dev/null || :
+    printf 'error: install transaction rolled back (simulated receipt failure)\n' >&2
+    return 76
+  fi
+
+  si_receipt=$INSTALL/install-result.json
+  si_receipt_tmp=$(mktemp "$INSTALL/.install-result.XXXXXX") || {
+    if [ "$si_created_entry" -eq 1 ] && [ -L "$si_entry" ] \
+      && cmp -s "$si_runtime" "$si_entry"; then
+      rm -f "$si_entry" 2>/dev/null || :
+    fi
+    [ "$si_created_runtime" -eq 0 ] || rm -f "$si_runtime" 2>/dev/null || :
+    printf 'error: install transaction rolled back (receipt staging failed)\n' >&2
+    return 76
+  }
+  if ! jq -n --arg entry "$si_entry" --arg runtime "$si_runtime" \
+      --arg content "$si_content" \
+      '{command:"seed",entry:$entry,runtime:$runtime,content:$content}' \
+      > "$si_receipt_tmp" \
+    || ! mv "$si_receipt_tmp" "$si_receipt"; then
+    rm -f "$si_receipt_tmp" 2>/dev/null || :
+    if [ "$si_created_entry" -eq 1 ] && [ -L "$si_entry" ] \
+      && cmp -s "$si_runtime" "$si_entry"; then
+      rm -f "$si_entry" 2>/dev/null || :
+    fi
+    [ "$si_created_runtime" -eq 0 ] || rm -f "$si_runtime" 2>/dev/null || :
+    printf 'error: install transaction rolled back (receipt write failed)\n' >&2
+    return 76
+  fi
+  printf 'installed: %s\n' "$si_entry" >&2
 }
 
 seed_run_task() {
   task=$1
   case $task in
     /ini) seed_install_global; return $? ;;
+    --maintain|/maintain) agent_maintain_experiences; return $? ;;
     # /help answers from the runtime here for the same reason it does on the
     # command line: the human is asking what they can type, and sending that
     # to the model makes it go build a commands table before it can answer.
@@ -2011,8 +3479,11 @@ seed_run_task() {
     sess=$ev/session
     shell_init "$sess" "$PWD"
   fi
+  run_provenance "$ev" "$sess"
+  agent_ensure_optional_pack memory 2>/dev/null || :
   rs=0
-  run_loop "$(product_system)" "$task" "$sess" "$ev" "$AGENT_MAX_ROUNDS" 1 || rs=$?
+  run_loop "$(product_system "$task")" "$task" "$sess" "$ev" "$AGENT_MAX_ROUNDS" 1 || rs=$?
+  [ "${SEED_RUN_MODE:-agent}" = simple ] || agent_sync_experience_skills || :
   last_msgs=$ev/messages.json
   return "$rs"
 }
@@ -2027,6 +3498,14 @@ seed_main() {
     set --
   fi
   seed_prepare_state
+  if [ "$oneshot" -eq 1 ] \
+    && { [ "$task" = --maintain ] || [ "$task" = /maintain ]; }; then
+    ensure_jq
+    seed_resolve_mode
+    [ "$SEED_RUN_MODE" = simple ] || agent_ensure_init
+    agent_maintain_experiences
+    return $?
+  fi
   seed_load_or_activate "$@"
   seed_resolve_mode
   [ "$SEED_RUN_MODE" = simple ] || agent_ensure_init
@@ -2070,8 +3549,11 @@ case ${1:-} in
   /help)
     seed_help
     exit 0 ;;
-  /packs|/pack)
+  /ini|/maintain|/packs|/pack)
     seed_cli_slash "$@"
+    exit $? ;;
+  --maintain)
+    seed_cli_slash /maintain
     exit $? ;;
   --oneshot|-p)
     # One-shot operation uses the existing saved activation.
@@ -2081,4 +3563,3 @@ case ${1:-} in
 esac
 
 seed_main "$@"
-

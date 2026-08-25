@@ -31,9 +31,44 @@ The answer so far: yes, and the constraint turns out to be a feature. A single p
 - **One file is everything.** Download `seed.sh`, feed it any OpenAI-compatible endpoint and key, and it is a complete agent. The same file is the documentation of itself: ~everything the agent does is readable shell.
 - **The shell owns the loop; the model owns the judgment.** The main loop, SSE streaming, error handling, and round limits live in the shell. What to look at, what to change, and when to stop are the model's decisions. The model is never asked to write its own controller each turn.
 - **Exactly two API tools.** A persistent `shell` (cwd and environment survive across calls) and an exact-replace `edit` (match zero or multiple times → fail, file untouched). No read/grep/glob/todo tools — those are ordinary commands inside the shell. "Two tools" is not "two abilities": everything the machine has is reachable through them.
-- **Find, verify, register, reuse — build only as a last resort.** On first start the seed surveys the machine and writes a capability index. If `rg` exists, use `rg`; if the box has Codex installed, register it. On a clean box with no `fd`, the agent looked up that Debian ships it as `fd-find` with binary `fdfind`, installed it, and finished the search task. Tool discovery is a graded skill, not an assumption.
-- **Extensions ship as prompts, not code.** The pack catalog under [`packs/agent/`](packs/agent/) publishes JSON prompts and empty scaffolds. New capabilities are grown by the model on the local machine, guided by prompts — never by fattening the seed.
-- **Never trust the model's word for it.** The interactive `/ini` command lets the model choose how to install the runtime as a global `seed` command, but the shell independently notarizes the result: the receipt, the frozen original PATH, the executable entry point, and a `--probe` identity check must all agree before success is declared. Fake receipts and PATH pollution are part of the test suite.
+- **Find, verify, register, reuse — build only as a last resort.** First launch records identity and a cheap `PATH` observation sweep. Tasks investigate plausible observations, verify only what they need, and register reusable capabilities. If `rg` exists, use `rg`; if a clean box lacks `fd`, look up that Debian ships it as `fd-find`, verify `fdfind`, then reuse it. Discovery is a graded skill, not a desktop-shaped assumption.
+- **Policy extensions ship as prompts, not code.** The pack catalog under [`packs/agent/`](packs/agent/) publishes JSON prompts and empty scaffolds. Generic integrity boundaries — atomic state writes, publication gates, retrieval limits, and install rollback — stay in the kernel; product-specific behavior stays in packs.
+- **Never trust the model's word for it.** `/ini` is an offline, deterministic shell transaction: it selects an existing user-owned writable directory from the frozen launch `PATH`, publishes an immutable content-addressed runtime without overwriting an existing `seed`, validates exact bytes and `--probe` identity, commits a receipt, and rolls back its own files on failure. No model call, profile edit, `sudo`, or network request is involved.
+
+## Agent Kernel architecture
+
+The narrow question was answered, and the answer generalizes: Seed does not chase feature-complete coding agents — it is the **Agent Kernel** that vertical agents grow from. The decision is recorded in [`docs/adr/0001-seed-as-agent-kernel.md`](docs/adr/0001-seed-as-agent-kernel.md). Three layers, each answering one question, nothing crossing:
+
+- **Capability = CLI** — what this machine can do. The Machine index is three layers: **observations** (what was seen here — one cheap `PATH` sweep at launch, plus whatever a task notices), **capabilities** (what has been investigated and verified, each carrying the exact `probe` command whose exit status is its `ok`), and **resources** (what exists off this machine that Seed already found once). No fixed tool fields: `git`, `python`, `docker`, `opkg`, and a vendor's `device-cli` are all the same record shape, so a BusyBox or OpenWrt box is not asked six desktop questions. Discovery is hardcoded; environment knowledge is not. The LLM keeps only the two primitives, `shell` and `edit`. A new capability is a new index entry plus a CLI on the machine — never a new function tool. See [`docs/adr/0002`](docs/adr/0002-machine-index-as-cognition.md).
+- **Skill = how to do things.** SKILL.md files per the agentskills.io spec, registered by name/description/path; the body is `cat`-ed only when a task hits (progressive disclosure). Distilled experiences are skills — one mechanism for method reuse, not two.
+- **Pack = what Seed grows into.** Published packs are prompt-only; installing one never edits `seed.sh`. The coding pack yields a coding agent; a security pack yields a Strix-like agent. Same kernel, same two tools, different pack.
+
+### Memory system ([`packs/agent/memory.json`](packs/agent/memory.json))
+
+Cross-session method reuse built from plain files, English-only internal records, prompt policy, and deterministic kernel gates — no database, vector index, or resident service:
+
+- Four layers: **L0 rules** (`rules.md`, always highest priority) → **L1 facts** (project notes/facts plus machine index) → **L2 experiences** (one directory per id, with a lifecycle) → **L3 evidence** (append-only `runs/*.jsonl`).
+- Experiences live a lifecycle: `candidate → active → degraded → quarantined / stale / retired`; retired moves to the attic, nothing is deleted.
+- The model has **proposal rights only**. `/maintain` and `--maintain` are offline runtime commands, never model turns: the kernel canonicalizes only unambiguous SKILL metadata (including adding wholly absent frontmatter), store-relative catalog/evidence spelling, and launch-path spelling; it runs every non-trivial `verify[]` separately in a fresh shell rooted at the launch workspace, writes its own exact receipt, and publishes only when the 16-field schema, timestamps, containment, canonical SKILL frontmatter, synchronized catalog row, and runtime evidence all agree. Present-but-invalid frontmatter and every non-contained path are rejected.
+- Retrieval has one runtime-owned funnel: OS/tool scope → active or degraded-with-warning status → English keyword score → deterministic ranking → at most 3 metadata rows. `SKILL.md` is loaded only on a hit; models must not scan the experience index to create a second activation path.
+- Experience is a skill: validated active/degraded experiences merge into `agent.skills` after every task. A capability going `ok:false` makes dependent experiences inapplicable immediately; maintenance can then move them to `stale`. The runtime fetches the catalog-declared memory prompt when absent, while automatic pack refresh remains opt-in (`SEED_AUTO_UPDATE=1`).
+
+### Pack ecosystem
+
+- [`packs/agent/`](packs/agent/) contains the prompt policies for `init`, memory, commands, skills, models, packs, delegation, delivery, and Web IDE. The agent catalog currently declares `init` as required and `memory` as the runtime-managed optional policy; product bundles may install the others under `agent-store/packs/`.
+- The catalog [`index.json`](packs/agent/index.json) is versioned. Set `SEED_AUTO_UPDATE=1` to opt into startup refresh; otherwise installed prompt policy remains pinned. Explicit `/packs` installs are unchanged.
+- `/packs install <slug>` lands a published pack into `agent-store/packs/`; `/packs` lists them all.
+
+### Delegation
+
+A subagent is one shell command — `seed --oneshot '<self-contained task>'` — with evidence landing under `.agent-runs/`. No scheduler, no orchestrator process: the Unix process tree is the multi-agent runtime.
+
+## What's planned
+
+Direction decided in ADR-0001; run provenance (`SEED_PARENT_RUN_ID` / `SEED_RUN_ROLE`) is already implemented. Remaining work:
+- **Seed Console.** A web UI that reads the run files under `.agent-runs/` and renders the run graph. A view over the runtime's own evidence — not a second agent loop, and deliberately not a Web IDE.
+- **Tighter capability contract.** Sharper semantics for `probe`, `scope`, and `ok` in the Machine index.
+- **Vertical packs.** security (Strix-like), microscope, research — each a prompt-only pack over the same kernel.
 
 ## What it can do
 
@@ -43,6 +78,8 @@ The answer so far: yes, and the constraint turns out to be a feature. A single p
 - Probe and reuse whatever the host already has (CLIs, interpreters, services), recording each capability with usage, invocation, and smoke-test results in a machine index that amortizes across tasks.
 - Install itself as a global command (`/ini`) with shell-side acceptance testing.
 - Run the official Terminal-Bench 2.1 suite (Harbor + Docker, all 89 tasks) by dropping the same `seed.sh` into each task container.
+- Distill successful tasks into reusable experiences (skills) with deterministic promotion, and pull them back on later tasks through the scope + keyword retrieval funnel.
+- Delegate self-contained subtasks to child agents via `seed --oneshot`, with run evidence under `.agent-runs/`.
 
 ## Experiments
 
@@ -87,7 +124,7 @@ No human wrote a line of either game. The runtime that did this is the same sing
 
 ### Notarized install and offline contract tests
 
-- `/ini` acceptance has been tested against fake receipts and PATH pollution: the model claiming success does nothing; the shell re-resolves `seed` with the frozen pre-run PATH and re-checks identity via `--probe`.
+- `/ini` acceptance covers offline execution, existing-command refusal, PATH pollution, exact-content validation, and rollback both before and after publishing the command entry.
 - An offline product contract (fake pack transport + LLM stub; no network, no real keys) covers 20+ cases: SSE chunk merging, truncated streams triggering a retry, empty replies never being accepted as a final answer, and more.
 
 ## Usage
@@ -113,7 +150,7 @@ Any OpenAI-compatible endpoint (third argument, the model name, is optional):
 /bin/sh seed.sh https://api.example.com/v1 sk-xxxx model-name
 ```
 
-Type `/ini` at the interactive prompt and the model will try to install the current runtime as a global command; the shell independently checks the receipt, PATH, and probe. On success:
+Type `/ini` at the interactive prompt to run the deterministic offline installer. It uses an existing user-owned writable directory already on the launch `PATH`, never edits shell profiles or overwrites another `seed`, and reports success only after exact-content, PATH, probe, and receipt checks. On success:
 
 ```sh
 seed
@@ -128,16 +165,20 @@ This GitHub tree **is** the product: [`seed.sh`](seed.sh) plus the prompt catalo
 
 ```sh
 /bin/sh -n seed.sh
+/bin/sh tests/test_seed_agent_kernel.sh
+/bin/sh tests/test_seed_modes.sh
+/bin/sh tests/test_seed_pack_manager.sh
 ```
 
-The catalog in [`packs/agent/`](packs/agent/) publishes prompts, not a second runtime. Change the agent's temperament by changing those JSON files; do not fatten `seed.sh`.
+The catalog in [`packs/agent/`](packs/agent/) publishes prompts, not a second runtime. Product policy belongs there; cross-pack safety and atomicity invariants belong in the kernel.
 
 ## What's in this repo
 
 | Path | Role |
 |---|---|
 | [`seed.sh`](seed.sh) | the whole runtime — download it and run |
-| [`packs/agent/`](packs/agent/) | prompt catalog: init, skills, commands, lazy extensions |
+| [`packs/agent/`](packs/agent/) | prompt catalog: init, skills, commands, memory, lazy extensions |
+| [`docs/adr/`](docs/adr/) | architecture decision records (ADR-0001: Seed as Agent Kernel) |
 | [`packs/seed/`](packs/seed/) | provider / model catalog |
 | [`packs/jq/`](packs/jq/) | jq fallback notes and fetch helper |
 | [`LICENSE`](LICENSE) | MIT |

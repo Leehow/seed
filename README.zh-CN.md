@@ -31,9 +31,44 @@ cd 你的项目
 - **一个文件就是全部。** 下载 `seed.sh`，喂任意 OpenAI 兼容接口和 key，它就是完整 agent。这份文件同时是它自己的文档：agent 做的几乎每件事都是可读的 shell。
 - **外壳拥有循环，模型拥有判断。** 主循环、SSE 流、错误处理、轮数控制在 shell 里；看什么、改什么、什么时候结束由模型决定。不让模型每轮另写 controller。
 - **API 工具只有两个。** 持久 `shell`（`cd` 和环境变量跨调用保留）和精确替换 `edit`（匹配 0 次或多次都失败、文件不动）。不加 read/grep/glob/todo——那些都是 shell 里的普通命令。「只有两个工具」不等于「只能做两件事」：机器上有的一切都够得着。
-- **先找、验证、登记、复用，找不到才造。** 首次启动普查本机能力，写入 Machine index：有 rg 就用 rg，装了 Codex 也登记。干净机上没有 `fd`，agent 查到 Debian 的包名是 `fd-find`、二进制叫 `fdfind`，装完接着完成检索任务。找工具是一项被打分的能力，不是一个假设。
-- **扩展只发提示词，不发代码。** [`packs/agent/`](packs/agent/) 的 catalog 里是 JSON prompt 和空树模板。新能力由模型按提示词在本机自己长出来——绝不靠加厚种子。
-- **不信模型的口头汇报。** 交互里的 `/ini` 让模型自选方式把 runtime 安装成全局 `seed` 命令，但外壳独立公证：回执、启动时冻结的原始 PATH、可执行入口、`--probe` 身份检查，全部对上才算成功。假回执和 PATH 污染都在测试套件里。
+- **先找、验证、登记、复用，找不到才造。** 首次启动只记录机器身份和一次廉价的 `PATH` observation；任务按需调查候选、验证真正需要的能力，再登记复用。有 `rg` 就用 `rg`；干净机没有 `fd`，就查到 Debian 的包名 `fd-find`，验证 `fdfind` 后复用。发现能力是一项被打分的技能，不是桌面环境假设。
+- **产品策略发提示词，通用边界留在内核。** [`packs/agent/`](packs/agent/) 发布 JSON prompt 和空树模板；原子状态写入、经验发布闸门、检索上限和安装回滚等通用完整性约束由 kernel 负责，垂直产品行为留在 pack。
+- **不信模型的口头汇报。** `/ini` 是离线、确定性的 shell 事务：只从启动时冻结的 `PATH` 里选择已有、当前用户拥有且可写的目录，以内容标识发布 runtime，不覆盖已有 `seed`；精确核对字节与 `--probe` 身份，最后提交回执，失败只回滚本事务创建的文件。全程不调用模型、不改 profile、不用 `sudo`、不联网。
+
+## Agent Kernel 架构
+
+收窄的问题有了答案，而且答案可以推广：Seed 不去追赶功能齐全的 coding agent——它是垂直 agent 从中长出来的 **Agent Kernel**。决策记录在 [`docs/adr/0001-seed-as-agent-kernel.md`](docs/adr/0001-seed-as-agent-kernel.md)。三层各答一问，互不越界：
+
+- **Capability = CLI**——这台机器能做什么。Machine index 分三层：**observations**（看见了什么——启动时一次廉价的 `PATH` 枚举，加上任务途中注意到的东西）、**capabilities**（调查并验证过什么，每条都带着那条决定 `ok` 的 `probe` 命令）、**resources**（机器之外已经找到过的现成东西）。没有固定工具字段：`git`、`python`、`docker`、`opkg`、某仪器厂商的 `device-cli` 是同一种记录，所以进到 BusyBox 或 OpenWrt 盒子里不会被问六个桌面问题。硬编码的是发现机制，不是环境知识。LLM 只保留 `shell`、`edit` 两个 primitive。新能力 = 一条新索引记录加机器上的一个 CLI，永远不是一个新的 function tool。详见 [`docs/adr/0002`](docs/adr/0002-machine-index-as-cognition.md)。
+- **Skill = 怎么做事情。** 按 agentskills.io 规范写的 SKILL.md，只登记 name/description/path，正文命中任务才 `cat`（渐进披露）。蒸馏出的经验就是 skill——方法复用只有一个机制，不是两个。
+- **Pack = 让 Seed 长成什么。** 发布的 pack 只有提示词；安装 pack 永远不改 `seed.sh`。coding pack 长出 coding agent，security pack 长出 Strix 式 agent。同一个 kernel、同样的两个工具，不同的 pack。
+
+### 记忆系统（[`packs/agent/memory.json`](packs/agent/memory.json)）
+
+跨会话的方法复用由普通文件、只用英文的内部记录、prompt 策略和确定性 kernel 闸门共同完成——没有数据库、向量索引或常驻服务：
+
+- 四层：**L0 规则**（`rules.md`，永远最高优先）→ **L1 事实**（项目 notes/facts 加机器索引）→ **L2 经验**（按 id 一目录、带生命周期）→ **L3 证据**（只追加的 `runs/*.jsonl`）。
+- 经验有生命周期：`candidate → active → degraded → quarantined / stale / retired`；retired 归档进 attic，不删除。
+- 模型只有**提案权**。`/maintain` 和 `--maintain` 是不调用模型的离线 runtime 命令：kernel 只规范化无歧义的 SKILL 元数据（包括补上完全缺失的 frontmatter）、store-relative catalog/evidence 写法和启动路径写法，再从启动目录为每条非空、非 no-op 的 `verify[]` 启动全新 shell 并写入自己的精确收据；已有但无效的 frontmatter 和任何不受 containment 约束的路径仍会被拒绝。只有 16 字段 schema、时间、路径 containment、规范 SKILL frontmatter、同步 catalog 行和 runtime evidence 全部一致才发布。
+- 检索只有一个 runtime 漏斗：OS/工具 scope → active 或带警告的 degraded → 英文关键词打分 → 确定性排序 → 最多 3 条 metadata。命中才加载 `SKILL.md`；模型不得扫描 experience index 另造激活通道。
+- 经验即 skill：通过校验的 active/degraded 经验在每个任务后合并进 `agent.skills`。能力变成 `ok:false` 时，依赖它的经验立即不可用，maintenance 再将其转成 `stale`。memory prompt 缺失时由 runtime 按 catalog 获取；自动 pack 更新仍须显式设置 `SEED_AUTO_UPDATE=1`。
+
+### Pack 生态
+
+- [`packs/agent/`](packs/agent/) 保存 `init`、memory、commands、skills、models、packs、delegation、delivery 和 Web IDE 的 prompt policy。当前 agent catalog 只声明 `init` 为必需、`memory` 为 runtime 管理的可选策略；产品 bundle 可把其余 prompt 安装到 `agent-store/packs/`。
+- catalog [`index.json`](packs/agent/index.json) 带版本号；只有显式设置 `SEED_AUTO_UPDATE=1` 才在启动时刷新，否则已安装的 prompt policy 保持固定。显式 `/packs` 安装不受影响。
+- `/packs install <slug>` 把已发布的 pack 落到 `agent-store/packs/`；`/packs` 列出全部。
+
+### 委派
+
+子 agent 就是一条 shell 命令——`seed --oneshot '<自包含任务>'`——证据落在 `.agent-runs/` 下。没有调度器、没有编排进程：Unix 进程树就是多 agent 运行时。
+
+## 规划中
+
+方向已在 ADR-0001 定下；run provenance（`SEED_PARENT_RUN_ID` / `SEED_RUN_ROLE`）已经实现。剩余工作：
+- **Seed Console。** 读 `.agent-runs/` 下 run 文件的 Web UI，渲染 run graph。它是 runtime 自己证据的一个视图——不是第二套 agent loop，也刻意不叫 Web IDE。
+- **Capability contract 收紧。** Machine index 里 `probe`、`scope`、`ok` 的语义更明确。
+- **垂直 pack 生态。** security（Strix 式）、microscope、research——每个都是同一 kernel 上的纯提示词 pack。
 
 ## 它能做什么
 
@@ -43,6 +78,8 @@ cd 你的项目
 - 探测并复用本机已有的 CLI、解释器、服务，连用途、调用方式、smoke 结果一起登记进能力索引，跨任务摊销探测成本。
 - 把自己安装成全局命令（`/ini`），装完由外壳验收。
 - 跑官方 Terminal-Bench 2.1 全套 89 题（Harbor + Docker）：每道题的容器里只放同一份 `seed.sh`。
+- 把成功任务蒸馏成可复用的经验（skill），晋升走确定性检查；后续任务经由 scope + 关键词检索漏斗取回。
+- 把自包含的子任务委派给子 agent（`seed --oneshot`），运行证据落在 `.agent-runs/`。
 
 ## 做过的实验
 
@@ -87,7 +124,7 @@ cd 你的项目
 
 ### 安装公证与离线合同
 
-- `/ini` 的验收对抗过假回执和 PATH 污染：模型说装好了没有用；外壳用启动时冻结的 PATH 重新解析 `seed`，再跑 `--probe` 核对身份。
+- `/ini` 的验收覆盖离线执行、已有命令拒绝、PATH 污染、精确内容校验，以及发布命令入口前后两阶段的回滚。
 - 离线产品合同（假 pack transport + LLM stub，不联网、不要真 key）覆盖 20+ 项：SSE 分片合并、断流触发重试、空回复不当终稿等。
 
 ## 使用
@@ -113,7 +150,7 @@ cd 你的项目
 /bin/sh seed.sh https://api.example.com/v1 sk-xxxx 模型名
 ```
 
-在交互提示符输入 `/ini`，模型会尝试把当前 runtime 安装成全局命令；外壳独立检查回执、PATH 和 probe。成功后：
+在交互提示符输入 `/ini` 会运行确定性的离线安装事务。它只使用启动 `PATH` 中已有、当前用户拥有且可写的目录，不改 shell profile、不覆盖另一个 `seed`；精确内容、PATH、probe 和回执全部通过才成功。之后可运行：
 
 ```sh
 seed
@@ -128,16 +165,20 @@ seed -p "任务"
 
 ```sh
 /bin/sh -n seed.sh
+/bin/sh tests/test_seed_agent_kernel.sh
+/bin/sh tests/test_seed_modes.sh
+/bin/sh tests/test_seed_pack_manager.sh
 ```
 
-[`packs/agent/`](packs/agent/) 里发布的是提示词，不是另一套 runtime。换脾气、换扩展，只改那些 JSON，不要加厚 `seed.sh`。
+[`packs/agent/`](packs/agent/) 里发布的是提示词，不是另一套 runtime。产品策略放在那里；跨 pack 的安全与原子性约束放在 kernel。
 
 ## 这个仓库里有什么
 
 | 路径 | 角色 |
 |---|---|
 | [`seed.sh`](seed.sh) | 完整 runtime——下载就能跑 |
-| [`packs/agent/`](packs/agent/) | 提示词 catalog：初始化、skills、commands、懒构建扩展 |
+| [`packs/agent/`](packs/agent/) | 提示词 catalog：初始化、skills、commands、记忆、懒构建扩展 |
+| [`docs/adr/`](docs/adr/) | 架构决策记录（ADR-0001：Seed as Agent Kernel） |
 | [`packs/seed/`](packs/seed/) | provider / model catalog |
 | [`packs/jq/`](packs/jq/) | jq 回退说明与拉取脚本 |
 | [`LICENSE`](LICENSE) | MIT |
