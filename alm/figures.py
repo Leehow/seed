@@ -37,8 +37,13 @@ MARK = {"py": "o", "sh": "s", "sql": "^", "asm": "D"}
 # Four points, two tight pairs: asm/sh differ by under 3x on the x axis and
 # py/sql by 6%, so a single offset rule cannot separate them. Placed by hand:
 # (dx, dy, horizontal alignment) in points.
-LABEL_POS = {"asm": (8, -14, "left"), "sh": (8, 5, "left"),
-             "py": (-8, -14, "right"), "sql": (8, 5, "left")}
+# Two pairs sit almost on top of each other: asm and sh are 0.44 decades
+# apart on a log axis, py and sql are 0.02 decades apart (6802 vs 7141 KiB,
+# a 5% difference that is itself part of the finding). No offset alone can
+# separate four labels here, so each is pulled clear and given a leader line
+# back to its own marker. (dx, dy) in points, plus the text alignment.
+LABEL_POS = {"asm": (7, -15, "left"), "sh": (0, 15, "center"),
+             "py": (-26, -20, "right"), "sql": (20, 20, "left")}
 
 
 def wilson(k, n, z=1.96):
@@ -82,7 +87,9 @@ def main():
         # in data terms and keeps every label next to its own marker.
         dx, dy, ha = LABEL_POS.get(kid, (0, 8, "center"))
         ax.annotate(LABEL[kid], (tcb, rate), textcoords="offset points",
-                    xytext=(dx, dy), ha=ha, fontsize=7.5)
+                    xytext=(dx, dy), ha=ha, va="center", fontsize=7.5,
+                    arrowprops=dict(arrowstyle="-", lw=0.5, color="#999999",
+                                    shrinkA=1, shrinkB=4))
         tsel = [r for r in tb if r["kernel"] == kid]
         if tsel:
             tn, ts = len(tsel), sum(r["success"] for r in tsel)
@@ -92,13 +99,17 @@ def main():
                         fmt=MARK[kid], ms=4, capsize=2.5, lw=1,
                         color="#4c72b0", mfc="#4c72b0", ecolor="#a8bcd8")
     ax.set_xscale("log")
+    ax.set_xlim(25, 16000)   # keep the leftmost marker off the spine
     ax.set_xlabel("trusted computing base (KiB, log scale)")
     ax.set_ylabel("tasks resolved")
-    ax.set_ylim(0, 1.18)
+    ax.set_ylim(0, 1.15)
     ax.plot([], [], "o", color="#222222", mfc="white", mew=1.1,
             label="local graded tasks")
     ax.plot([], [], "o", color="#4c72b0", label="Terminal-Bench 2.1")
-    ax.legend(frameon=False, loc="center right")
+    # The data occupies the top half; the legend goes in the empty lower left
+    # rather than across the Terminal-Bench points it is there to explain.
+    ax.legend(frameon=False, loc="lower left", fontsize=7.5,
+              handletextpad=0.4, borderaxespad=0.3)
     ax.set_title("(a) two orders of magnitude of runtime,\n    one capability",
                  loc="left")
 
