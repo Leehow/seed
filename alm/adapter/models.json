@@ -1,0 +1,85 @@
+{
+ "deepseek-flash": {
+  "vendor": "deepseek",
+  "model": "deepseek-v4-flash",
+  "url_env": "LLM_API_URL",
+  "key_env": "LLM_API_KEY",
+  "extra": {
+   "thinking": {
+    "type": "disabled"
+   }
+  },
+  "temperature": 0,
+  "note": "DO NOT USE -- bills the official api.deepseek.com directly. Kept only so arm 1 stays reproducible; use ds-flash-plan / ds-pro-plan instead. RETIRED 2026-08-31 on cost grounds. Used for the first Terminal-Bench arm (1560 trials); kept so that arm stays reproducible. primary model; reasoning disabled",
+  "retired": true
+ },
+ "deepseek-pro": {
+  "vendor": "deepseek",
+  "model": "deepseek-v4-pro",
+  "url_env": "LLM_API_URL",
+  "key_env": "LLM_API_KEY",
+  "extra": {
+   "thinking": {
+    "type": "disabled"
+   }
+  },
+  "temperature": 0,
+  "note": "DO NOT USE -- bills the official api.deepseek.com directly. Kept only so arm 1 stays reproducible; use ds-flash-plan / ds-pro-plan instead. RETIRED 2026-08-31 on cost grounds. Used for the first Terminal-Bench arm (1560 trials); kept so that arm stays reproducible. same vendor, stronger tier",
+  "retired": true
+ },
+ "gpt-5.6-low": {
+  "vendor": "openai-compatible-proxy",
+  "model": "gpt-5.6-low",
+  "url": "http://127.0.0.1:18888/v1/chat/completions",
+  "temperature": null,
+  "note": "different vendor; endpoint rejects temperature and top_p, so neither is sent. The -none and -medium reasoning tiers of the same endpoint refused the text protocol outright (halting on turn 1 with 'unable to proceed') and were not used; recorded here because it is a model-side confound, not a substrate effect."
+ },
+ "deepseek-flash-think": {
+  "vendor": "deepseek",
+  "model": "deepseek-v4-flash",
+  "url_env": "LLM_API_URL",
+  "key_env": "LLM_API_KEY",
+  "extra": {},
+  "temperature": 0,
+  "note": "DO NOT USE -- bills the official api.deepseek.com directly. Kept only so arm 1 stays reproducible; use ds-flash-plan / ds-pro-plan instead. RETIRED 2026-08-31 on cost grounds. Used for the first Terminal-Bench arm (1560 trials); kept so that arm stays reproducible. same model with reasoning left at the provider default. The other deepseek entries disable it, which is inherited from the repository's .env and is a configuration choice, not a property of the model.",
+  "retired": true
+ },
+ "grok-low": {
+  "vendor": "xai-via-local-relay",
+  "model": "grok-4.5-low",
+  "url": "http://127.0.0.1:18891/v1/chat/completions",
+  "temperature": 0,
+  "note": "primary. Reasoning is on and not configurable from here. The relay needs no API key, so container runs carry no credential. Inside a container set ALM_MODEL_URL to the host.docker.internal form."
+ },
+ "grok-high": {
+  "vendor": "xai-via-local-relay",
+  "model": "grok-4.5-high",
+  "url": "http://127.0.0.1:18891/v1/chat/completions",
+  "temperature": 0,
+  "note": "same model family at a higher reasoning effort; this is the model factor for H3, replacing the deepseek flash/pro pair."
+ },
+ "qwen-max": {
+  "vendor": "alibaba-qwen",
+  "model": "qwen3.8-max",
+  "url_env": "QWEN_API_URL",
+  "key_env": "QWEN_API_KEY",
+  "temperature": 0,
+  "note": "cross-vendor model factor for H3. Paid endpoint: the key lives in .env (gitignored) and is never written into this file."
+ },
+ "ds-flash-plan": {
+  "vendor": "deepseek-via-qwen-plan",
+  "model": "deepseek-v4-flash-0731",
+  "url_env": "QWEN_API_URL",
+  "key_env": "QWEN_API_KEY",
+  "temperature": 0,
+  "note": "deepseek through the prepaid plan. NOTE: this is the 0731 snapshot, not necessarily byte-identical to the endpoint arm 1 used, so it does not silently extend arm 1."
+ },
+ "ds-pro-plan": {
+  "vendor": "deepseek-via-qwen-plan",
+  "model": "deepseek-v4-pro-0813",
+  "url_env": "QWEN_API_URL",
+  "key_env": "QWEN_API_KEY",
+  "temperature": 0,
+  "note": "pinned snapshot. Not listed by the endpoint's /models but served: the unpinned 'deepseek-v4-pro' alias can move under you, a dated one cannot, which is what a reproducible arm needs."
+ }
+}

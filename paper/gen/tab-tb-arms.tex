@@ -1,0 +1,10 @@
+\begin{tabular}{llrrrrrl}
+\toprule
+model & protocol & tasks & substrates & repeats & trials & resolved & role \\
+\midrule
+\texttt{deepseek-v4-flash} & \texttt{a (terse)} & 89 & 3 & 5 & 1263 & \textbf{0.171} & retired on cost \\
+\texttt{deepseek-v4-flash} & \texttt{b (reasoned)} & 89 & 3 & 1 & 266 & \textbf{0.199} & prompt contrast \\
+\texttt{grok-4.5-low} & \texttt{br} & 89 & 3 & 3 & 791 & \textbf{0.465} & substrate comparison \\
+\texttt{qwen3.8-max} & \texttt{br} & 89 & 1 & 1 & 89 & \textbf{0.258} & model factor \\
+\bottomrule
+\end{tabular}

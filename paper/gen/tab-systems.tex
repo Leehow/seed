@@ -1,0 +1,10 @@
+\begin{tabular}{llrrrrrrrr}
+\toprule
+kernel & substrate & src KiB & gzip KiB & LOC & TCB KiB & cold ms & warm p50 ms & transitions/s & peak RSS MiB \\
+\midrule
+\texttt{py} & cpython 3 & 9.1 & 2.6 & 212 & 6801.6 & 16.5 & 17.1 & 177,139 & 21.8 \\
+\texttt{sh} & POSIX /bin/sh & 6.8 & 2.2 & 180 & 98.7 & 6.4 & 7.2 & 2,975 & 2.5 \\
+\texttt{sql} & SQLite relational & 15.1 & 3.3 & 239 & 7141.3 & 37.2 & 32.9 & 280 & 104.8 \\
+\texttt{asm} & ARM64 assembly & 39.6 & 7.2 & 1330 & 36.5 & 6.0 & 2.8 & 463,755 & 1.7 \\
+\bottomrule
+\end{tabular}

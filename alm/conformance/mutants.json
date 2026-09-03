@@ -1,0 +1,235 @@
+{
+ "cases": 350,
+ "mutants": [
+  {
+   "name": "budget-never-spent",
+   "applied": true,
+   "description": "steps_left is not decremented on a tool response",
+   "cases_failed": 317,
+   "cases": 350,
+   "detection_rate": 0.9057142857142857,
+   "first_symptom": "effect[2]",
+   "detected_by": [
+    "branch",
+    "budget",
+    "envfault",
+    "ext",
+    "idempotency",
+    "normal",
+    "protocol"
+   ]
+  },
+  {
+   "name": "repairs-unbounded",
+   "applied": true,
+   "description": "protocol repair ignores its budget",
+   "cases_failed": 65,
+   "cases": 350,
+   "detection_rate": 0.18571428571428572,
+   "first_symptom": "trace[3]",
+   "detected_by": [
+    "branch",
+    "ext",
+    "protocol"
+   ]
+  },
+  {
+   "name": "retries-unbounded",
+   "applied": true,
+   "description": "transport retry ignores its budget",
+   "cases_failed": 27,
+   "cases": 350,
+   "detection_rate": 0.07714285714285714,
+   "first_symptom": "exit=3 stderr=",
+   "detected_by": [
+    "protocol"
+   ]
+  },
+  {
+   "name": "accepts-stale-eid",
+   "applied": true,
+   "description": "an event answering an old effect is processed",
+   "cases_failed": 24,
+   "cases": 350,
+   "detection_rate": 0.06857142857142857,
+   "first_symptom": "event 16: expected an effect, got none (timeout)",
+   "detected_by": [
+    "idempotency"
+   ]
+  },
+  {
+   "name": "terminal-not-absorbing",
+   "applied": true,
+   "description": "events after final are processed again",
+   "cases_failed": 50,
+   "cases": 350,
+   "detection_rate": 0.14285714285714285,
+   "first_symptom": "trace[21]",
+   "detected_by": [
+    "idempotency"
+   ]
+  },
+  {
+   "name": "feedback-always-on",
+   "applied": true,
+   "description": "the observation is appended even when feedback is off",
+   "cases_failed": 17,
+   "cases": 350,
+   "detection_rate": 0.04857142857142857,
+   "first_symptom": "effect[2]",
+   "detected_by": [
+    "ext"
+   ]
+  },
+  {
+   "name": "history-unbounded",
+   "applied": true,
+   "description": "history_max is ignored when selecting refs",
+   "cases_failed": 45,
+   "cases": 350,
+   "detection_rate": 0.12857142857142856,
+   "first_symptom": "effect[4]",
+   "detected_by": [
+    "budget",
+    "ext"
+   ]
+  },
+  {
+   "name": "repair-loses-note",
+   "applied": true,
+   "description": "a protocol repair does not show the model its error",
+   "cases_failed": 42,
+   "cases": 350,
+   "detection_rate": 0.12,
+   "first_symptom": "effect[3]",
+   "detected_by": [
+    "branch",
+    "ext",
+    "protocol"
+   ]
+  },
+  {
+   "name": "retry-appends-note",
+   "applied": true,
+   "description": "a transport retry pretends the model answered",
+   "cases_failed": 18,
+   "cases": 350,
+   "detection_rate": 0.05142857142857143,
+   "first_symptom": "effect[1]",
+   "detected_by": [
+    "protocol"
+   ]
+  },
+  {
+   "name": "transport-is-repair",
+   "applied": true,
+   "description": "a failed model call is charged to the repair budget",
+   "cases_failed": 10,
+   "cases": 350,
+   "detection_rate": 0.02857142857142857,
+   "first_symptom": "exit=3 stderr=",
+   "detected_by": [
+    "protocol"
+   ]
+  },
+  {
+   "name": "step-never-advances",
+   "applied": true,
+   "description": "the step counter stays at 1",
+   "cases_failed": 307,
+   "cases": 350,
+   "detection_rate": 0.8771428571428571,
+   "first_symptom": "effect[2]",
+   "detected_by": [
+    "branch",
+    "budget",
+    "envfault",
+    "ext",
+    "idempotency",
+    "normal",
+    "protocol"
+   ]
+  },
+  {
+   "name": "attempt-never-resets",
+   "applied": true,
+   "description": "attempt is not reset at a new step",
+   "cases_failed": 46,
+   "cases": 350,
+   "detection_rate": 0.13142857142857142,
+   "first_symptom": "effect[5]",
+   "detected_by": [
+    "branch",
+    "ext",
+    "protocol"
+   ]
+  },
+  {
+   "name": "budget-off-by-one",
+   "applied": true,
+   "description": "the run stops one step early",
+   "cases_failed": 101,
+   "cases": 350,
+   "detection_rate": 0.2885714285714286,
+   "first_symptom": "event 14: expected an effect, got none (timeout)",
+   "detected_by": [
+    "branch",
+    "budget",
+    "envfault",
+    "ext",
+    "idempotency",
+    "normal"
+   ]
+  },
+  {
+   "name": "halt-status-dropped",
+   "applied": true,
+   "description": "the model's own verdict is not recorded",
+   "cases_failed": 32,
+   "cases": 350,
+   "detection_rate": 0.09142857142857143,
+   "first_symptom": "effect[7]",
+   "detected_by": [
+    "envfault",
+    "normal"
+   ]
+  },
+  {
+   "name": "allow-halt-ignored",
+   "applied": true,
+   "description": "the fixed-horizon knob is not honoured",
+   "cases_failed": 13,
+   "cases": 350,
+   "detection_rate": 0.037142857142857144,
+   "first_symptom": "event 1: expected an effect, got none (timeout)",
+   "detected_by": [
+    "ext"
+   ]
+  },
+  {
+   "name": "refused-halt-spends-repair",
+   "applied": true,
+   "description": "a refused halt is charged to the repair budget",
+   "cases_failed": 13,
+   "cases": 350,
+   "detection_rate": 0.037142857142857144,
+   "first_symptom": "trace[1]",
+   "detected_by": [
+    "ext"
+   ]
+  },
+  {
+   "name": "unknown-action-repaired",
+   "applied": true,
+   "description": "an unrecognised action is guessed at instead of ignored",
+   "cases_failed": 26,
+   "cases": 350,
+   "detection_rate": 0.07428571428571429,
+   "first_symptom": "trace[12]",
+   "detected_by": [
+    "idempotency"
+   ]
+  }
+ ],
+ "undetected": 0
+}

@@ -1,0 +1,18 @@
+\begin{tabular}{llrr}
+\toprule
+rule & specification & trace records & cases \\
+\midrule
+\texttt{start} & s4.1 start & 350 & 350 \\
+\texttt{tool} & s4.2 model calls a tool & 1195 & 317 \\
+\texttt{halt} & s4.3 model halts & 204 & 204 \\
+\texttt{halt\_disabled} & s8 halt refused (ext) & 23 & 13 \\
+\texttt{repair} & s4.5 protocol repair & 62 & 45 \\
+\texttt{abort\_protocol} & s4.5 repairs exhausted & 35 & 35 \\
+\texttt{retry} & s4.5 transport retry & 23 & 18 \\
+\texttt{abort\_transport} & s4.5 retries exhausted & 13 & 13 \\
+\texttt{observe} & s4.4 observation, run continues & 1097 & 307 \\
+\texttt{abort\_budget} & s4.4 budget exhausted & 98 & 98 \\
+\texttt{stale\_event} & s4.6 event ignored & 384 & 50 \\
+\texttt{after\_terminal} & s4.6 event after terminal & 102 & 50 \\
+\bottomrule
+\end{tabular}

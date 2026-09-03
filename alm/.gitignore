@@ -1,0 +1,10 @@
+# built from museed-arm64.S
+museed-arm64
+museed-arm64.dSYM/
+__pycache__/
+# regenerated exactly by gen_cases.py from the seed recorded in cases.index.json
+conformance/cases/
+# raw Harbor output: ~470 MB of per-trial container logs. The analysable
+# extract is bench/results-tb.jsonl, and the discarded arms are summarised in
+# bench/results-discarded.jsonl, so nothing a reader needs lives only here.
+bench/jobs/

@@ -1,0 +1,240 @@
+{
+ "host": {
+  "uname": "Darwin 25.6.0 arm64",
+  "python": "3.13.5"
+ },
+ "alm": {
+  "rules": 9,
+  "state_fields": 13
+ },
+ "kernels": {
+  "py": {
+   "name": "muSeed-Python",
+   "substrate": "cpython 3",
+   "kernel_only": {
+    "files": [
+     "museed.py"
+    ],
+    "source_bytes": 9333,
+    "gzip_bytes": 2639,
+    "logical_loc": 212
+   },
+   "tcb": {
+    "components": 44,
+    "resolvable_bytes": 6964852,
+    "parts": {
+     "python3.13": 6113312,
+     "_collections_abc.py": 32264,
+     "_sitebuiltins.py": 3128,
+     "abc.py": 6538,
+     "codecs.py": 36928,
+     "__init__.py": 6755,
+     "copyreg.py": 7614,
+     "aliases.py": 15713,
+     "utf_8.py": 1005,
+     "utf_8_sig.py": 4133,
+     "enum.py": 85578,
+     "functools.py": 39123,
+     "genericpath.py": 6247,
+     "_abc.py": 1354,
+     "_bootstrap.py": 57082,
+     "_bootstrap_external.py": 73147,
+     "machinery.py": 934,
+     "util.py": 11199,
+     "io.py": 3582,
+     "decoder.py": 12872,
+     "encoder.py": 16148,
+     "scanner.py": 2434,
+     "keyword.py": 1073,
+     "_json.cpython-313-darwin.so": 90112,
+     "linecache.py": 7284,
+     "operator.py": 10980,
+     "os.py": 41635,
+     "posixpath.py": 18360,
+     "_casefix.py": 5444,
+     "_compiler.py": 26290,
+     "_constants.py": 5939,
+     "_parser.py": 41237,
+     "reprlib.py": 7192,
+     "site.py": 25568,
+     "sitecustomize.py": 1357,
+     "stat.py": 6147,
+     "types.py": 11207,
+     "zipimport.py": 32890,
+     "libSystem.B.dylib": 0
+    }
+   },
+   "startup": {
+    "n": 200,
+    "first_ms": 16.479,
+    "p50_ms": 17.084,
+    "p95_ms": 18.604,
+    "p99_ms": 21.068,
+    "min_ms": 15.188
+   },
+   "throughput": {
+    "transitions": 100000,
+    "wall_s": 0.565,
+    "per_transition_us": 5.645,
+    "transitions_per_s": 177139,
+    "peak_rss_bytes": 22872064
+   }
+  },
+  "sh": {
+   "name": "muSeed-Shell",
+   "substrate": "POSIX /bin/sh",
+   "kernel_only": {
+    "files": [
+     "museed.sh"
+    ],
+    "source_bytes": 6955,
+    "gzip_bytes": 2276,
+    "logical_loc": 180
+   },
+   "tcb": {
+    "components": 2,
+    "resolvable_bytes": 101040,
+    "parts": {
+     "sh": 101040,
+     "libSystem.B.dylib": 0
+    }
+   },
+   "startup": {
+    "n": 200,
+    "first_ms": 6.387,
+    "p50_ms": 7.229,
+    "p95_ms": 16.882,
+    "p99_ms": 31.271,
+    "min_ms": 5.036
+   },
+   "throughput": {
+    "transitions": 100000,
+    "wall_s": 33.609,
+    "per_transition_us": 336.09,
+    "transitions_per_s": 2975,
+    "peak_rss_bytes": 2588672
+   }
+  },
+  "sql": {
+   "name": "muSeed-SQL",
+   "substrate": "SQLite relational",
+   "kernel_only": {
+    "files": [
+     "museed.sql"
+    ],
+    "source_bytes": 15494,
+    "gzip_bytes": 3414,
+    "logical_loc": 239,
+    "pump_bytes": 2555,
+    "pump_logical_loc": 59
+   },
+   "tcb": {
+    "components": 50,
+    "resolvable_bytes": 7312712,
+    "parts": {
+     "python3.13": 6113312,
+     "_collections_abc.py": 32264,
+     "_sitebuiltins.py": 3128,
+     "abc.py": 6538,
+     "codecs.py": 36928,
+     "__init__.py": 2501,
+     "copyreg.py": 7614,
+     "datetime.py": 268,
+     "aliases.py": 15713,
+     "utf_8.py": 1005,
+     "utf_8_sig.py": 4133,
+     "enum.py": 85578,
+     "functools.py": 39123,
+     "genericpath.py": 6247,
+     "_abc.py": 1354,
+     "_bootstrap.py": 57082,
+     "_bootstrap_external.py": 73147,
+     "machinery.py": 934,
+     "util.py": 11199,
+     "io.py": 3582,
+     "decoder.py": 12872,
+     "encoder.py": 16148,
+     "scanner.py": 2434,
+     "keyword.py": 1073,
+     "_datetime.cpython-313-darwin.so": 151632,
+     "_json.cpython-313-darwin.so": 90112,
+     "_sqlite3.cpython-313-darwin.so": 162880,
+     "linecache.py": 7284,
+     "operator.py": 10980,
+     "os.py": 41635,
+     "posixpath.py": 18360,
+     "_casefix.py": 5444,
+     "_compiler.py": 26290,
+     "_constants.py": 5939,
+     "_parser.py": 41237,
+     "reprlib.py": 7192,
+     "site.py": 25568,
+     "sitecustomize.py": 1357,
+     "dbapi2.py": 3631,
+     "stat.py": 6147,
+     "types.py": 11207,
+     "warnings.py": 26948,
+     "zipimport.py": 32890,
+     "libSystem.B.dylib": 0
+    }
+   },
+   "startup": {
+    "n": 200,
+    "first_ms": 37.151,
+    "p50_ms": 32.938,
+    "p95_ms": 53.322,
+    "p99_ms": 69.696,
+    "min_ms": 30.219
+   },
+   "throughput": {
+    "transitions": 100000,
+    "wall_s": 356.092,
+    "per_transition_us": 3560.922,
+    "transitions_per_s": 280,
+    "peak_rss_bytes": 109920256
+   }
+  },
+  "asm": {
+   "name": "muSeed-ASM",
+   "substrate": "ARM64 assembly",
+   "kernel_only": {
+    "files": [
+     "museed-arm64.S"
+    ],
+    "source_bytes": 40590,
+    "gzip_bytes": 7357,
+    "logical_loc": 1330,
+    "binary_bytes": 37392,
+    "stripped_binary_bytes": 33400
+   },
+   "tcb": {
+    "components": 2,
+    "resolvable_bytes": 37392,
+    "parts": {
+     "museed-arm64": 37392,
+     "libSystem.B.dylib": 0
+    }
+   },
+   "startup": {
+    "n": 200,
+    "first_ms": 5.959,
+    "p50_ms": 2.844,
+    "p95_ms": 5.755,
+    "p99_ms": 7.762,
+    "min_ms": 2.219
+   },
+   "throughput": {
+    "transitions": 100000,
+    "wall_s": 0.216,
+    "per_transition_us": 2.156,
+    "transitions_per_s": 463755,
+    "peak_rss_bytes": 1769472
+   }
+  }
+ },
+ "shared_adapter": {
+  "bytes": 15081,
+  "logical_loc": 343,
+  "note": "identical for every kernel; cancels in comparisons"
+ }
+}

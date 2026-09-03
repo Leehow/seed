@@ -1,0 +1,23 @@
+\begin{tabular}{llrr}
+\toprule
+mutation & what it breaks & cases failing & rate \\
+\midrule
+\texttt{budget-never-spent} & steps\_left is not decremented on a tool response & 317 & 90.6\% \\
+\texttt{repairs-unbounded} & protocol repair ignores its budget & 65 & 18.6\% \\
+\texttt{retries-unbounded} & transport retry ignores its budget & 27 & 7.7\% \\
+\texttt{accepts-stale-eid} & an event answering an old effect is processed & 24 & 6.9\% \\
+\texttt{terminal-not-absorbing} & events after final are processed again & 50 & 14.3\% \\
+\texttt{feedback-always-on} & the observation is appended even when feedback is off & 17 & 4.9\% \\
+\texttt{history-unbounded} & history\_max is ignored when selecting refs & 45 & 12.9\% \\
+\texttt{repair-loses-note} & a protocol repair does not show the model its error & 42 & 12.0\% \\
+\texttt{retry-appends-note} & a transport retry pretends the model answered & 18 & 5.1\% \\
+\texttt{transport-is-repair} & a failed model call is charged to the repair budget & 10 & 2.9\% \\
+\texttt{step-never-advances} & the step counter stays at 1 & 307 & 87.7\% \\
+\texttt{attempt-never-resets} & attempt is not reset at a new step & 46 & 13.1\% \\
+\texttt{budget-off-by-one} & the run stops one step early & 101 & 28.9\% \\
+\texttt{halt-status-dropped} & the model's own verdict is not recorded & 32 & 9.1\% \\
+\texttt{allow-halt-ignored} & the fixed-horizon knob is not honoured & 13 & 3.7\% \\
+\texttt{refused-halt-spends-repair} & a refused halt is charged to the repair budget & 13 & 3.7\% \\
+\texttt{unknown-action-repaired} & an unrecognised action is guessed at instead of ignored & 26 & 7.4\% \\
+\bottomrule
+\end{tabular}

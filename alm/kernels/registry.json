@@ -1,0 +1,46 @@
+{
+ "py": {
+  "name": "muSeed-Python",
+  "substrate": "cpython 3",
+  "argv": [
+   "python3",
+   "KERNELS/museed.py"
+  ],
+  "kernel_files": [
+   "museed.py"
+  ]
+ },
+ "sh": {
+  "name": "muSeed-Shell",
+  "substrate": "POSIX /bin/sh",
+  "argv": [
+   "/bin/sh",
+   "KERNELS/museed.sh"
+  ],
+  "kernel_files": [
+   "museed.sh"
+  ]
+ },
+ "sql": {
+  "name": "muSeed-SQL",
+  "substrate": "SQLite relational",
+  "argv": [
+   "python3",
+   "KERNELS/sqlpump.py",
+   "KERNELS/museed.sql"
+  ],
+  "kernel_files": [
+   "museed.sql"
+  ]
+ },
+ "asm": {
+  "name": "muSeed-ASM",
+  "substrate": "ARM64 assembly",
+  "argv": [
+   "KERNELS/museed-arm64"
+  ],
+  "kernel_files": [
+   "museed-arm64.S"
+  ]
+ }
+}

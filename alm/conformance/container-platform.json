@@ -1,0 +1,20 @@
+{
+ "image": "alexgshaw/fix-git:20260403",
+ "note": "a Terminal-Bench 2.1 task image, run under Docker on an arm64 host (linux/amd64 emulation)",
+ "platform": "Linux x86_64",
+ "python": "3.13.12",
+ "sqlite": "3.40.1",
+ "kernels": [
+  "py",
+  "sh",
+  "sql"
+ ],
+ "why_no_asm": "the assembly kernel is Mach-O and needs an ELF port",
+ "asm_linux": {
+  "image": "gcc:13 (linux/arm64)",
+  "platform": "Linux aarch64",
+  "built_with": "cc -o museed-arm64 museed-arm64.S",
+  "cases_passed": "350/350",
+  "note": "the same assembly source as macOS; the ISA is identical and only syscall numbers, the syscall register, symbol-address spelling, section names and the O_CREAT flag bits are conditional"
+ }
+}
