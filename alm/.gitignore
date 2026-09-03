@@ -8,3 +8,5 @@ conformance/cases/
 # extract is bench/results-tb.jsonl, and the discarded arms are summarised in
 # bench/results-discarded.jsonl, so nothing a reader needs lives only here.
 bench/jobs/
+# stray run logs from interactive debugging
+*.log

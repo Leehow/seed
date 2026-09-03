@@ -1,0 +1,43 @@
+{
+ "salt": "alm-v0.1:",
+ "n": 30,
+ "rule": "proportional by difficulty, largest remainder; within stratum ordered by sha256(salt+dir)",
+ "quotas": {
+  "medium": 19,
+  "hard": 10,
+  "easy": 1
+ },
+ "checkout_commit": "7131e4375048a0e408a8fb404b5f499d726b695b",
+ "tasks": [
+  "build-pov-ray",
+  "cancel-async-tasks",
+  "crack-7z-hash",
+  "db-wal-recovery",
+  "distribution-search",
+  "dna-insert",
+  "extract-moves-from-video",
+  "feal-differential-cryptanalysis",
+  "financial-document-processor",
+  "fix-git",
+  "kv-store-grpc",
+  "large-scale-text-editing",
+  "log-summary-date-ranges",
+  "merge-diff-arc-agi-task",
+  "modernize-scientific-stack",
+  "mteb-retrieve",
+  "multi-source-data-merger",
+  "password-recovery",
+  "path-tracing",
+  "path-tracing-reverse",
+  "polyglot-c-py",
+  "polyglot-rust-c",
+  "protein-assembly",
+  "pypi-server",
+  "regex-chess",
+  "sanitize-git-repo",
+  "sparql-university",
+  "sqlite-db-truncate",
+  "sqlite-with-gcov",
+  "winning-avg-corewars"
+ ]
+}

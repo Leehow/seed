@@ -1,0 +1,902 @@
+{
+ "dataset": "terminal-bench/terminal-bench-2-1",
+ "checkout_commit": "7131e4375048a0e408a8fb404b5f499d726b695b",
+ "count": 89,
+ "difficulty_counts": {
+  "easy": 4,
+  "hard": 30,
+  "medium": 55
+ },
+ "tasks": [
+  {
+   "dir": "adaptive-rejection-sampler",
+   "name": "terminal-bench/adaptive-rejection-sampler",
+   "difficulty": "medium",
+   "category": "scientific-computing",
+   "agent_timeout_sec": 900.0,
+   "verifier_timeout_sec": 900.0,
+   "docker_image": "alexgshaw/adaptive-rejection-sampler:20251031",
+   "rank": "9084f1dbb0100ab57956e14690d37fd1efef2b473a1152ed4bfaddc484afd2de"
+  },
+  {
+   "dir": "bn-fit-modify",
+   "name": "terminal-bench/bn-fit-modify",
+   "difficulty": "hard",
+   "category": "scientific-computing",
+   "agent_timeout_sec": 3600.0,
+   "verifier_timeout_sec": 3600.0,
+   "docker_image": "alexgshaw/bn-fit-modify:20251031",
+   "rank": "7ae7663dd36ee30c8a4461103933de53c285aab7296019263b3551b8b15672d6"
+  },
+  {
+   "dir": "break-filter-js-from-html",
+   "name": "terminal-bench/break-filter-js-from-html",
+   "difficulty": "medium",
+   "category": "security",
+   "agent_timeout_sec": 1200.0,
+   "verifier_timeout_sec": 1200.0,
+   "docker_image": "alexgshaw/break-filter-js-from-html:20251031",
+   "rank": "d18afd9c07eaeee9d7de153f7aa881b693fdab095b5123c94b5d7a948fdc98d7"
+  },
+  {
+   "dir": "build-cython-ext",
+   "name": "terminal-bench/build-cython-ext",
+   "difficulty": "medium",
+   "category": "debugging",
+   "agent_timeout_sec": 900.0,
+   "verifier_timeout_sec": 900.0,
+   "docker_image": "alexgshaw/build-cython-ext:20251031",
+   "rank": "fc945019cd0e6f380f578c6109bbea9748e2c4a592d3468e56a4cea81a5f88f5"
+  },
+  {
+   "dir": "build-pmars",
+   "name": "terminal-bench/build-pmars",
+   "difficulty": "medium",
+   "category": "software-engineering",
+   "agent_timeout_sec": 900.0,
+   "verifier_timeout_sec": 900.0,
+   "docker_image": "alexgshaw/build-pmars:20251031",
+   "rank": "7ba67831ddf7acf560a7e9e837352bf94b66d03a5b4376abef57908866ca339b"
+  },
+  {
+   "dir": "build-pov-ray",
+   "name": "terminal-bench/build-pov-ray",
+   "difficulty": "medium",
+   "category": "software-engineering",
+   "agent_timeout_sec": 12000.0,
+   "verifier_timeout_sec": 12000.0,
+   "docker_image": "alexgshaw/build-pov-ray:20251031",
+   "rank": "44dea6b28a3786bd36d435fd2cb879a1571bc68d0c0f4137adf1e7dcd54d0ef8"
+  },
+  {
+   "dir": "caffe-cifar-10",
+   "name": "terminal-bench/caffe-cifar-10",
+   "difficulty": "medium",
+   "category": "machine-learning",
+   "agent_timeout_sec": 3600.0,
+   "verifier_timeout_sec": 1200.0,
+   "docker_image": "alexgshaw/caffe-cifar-10:20260403",
+   "rank": "82ce2fc543cddfd76873e762b8a27dc899d3028708f83086052fc419427cc396"
+  },
+  {
+   "dir": "cancel-async-tasks",
+   "name": "terminal-bench/cancel-async-tasks",
+   "difficulty": "hard",
+   "category": "software-engineering",
+   "agent_timeout_sec": 900.0,
+   "verifier_timeout_sec": 900.0,
+   "docker_image": "alexgshaw/cancel-async-tasks:20251031",
+   "rank": "3690423d373ff4a7a4d75273e3bf5914e6623ed46fd9b654e1919e7017ff10ae"
+  },
+  {
+   "dir": "chess-best-move",
+   "name": "terminal-bench/chess-best-move",
+   "difficulty": "medium",
+   "category": "games",
+   "agent_timeout_sec": 900.0,
+   "verifier_timeout_sec": 900.0,
+   "docker_image": "alexgshaw/chess-best-move:20251031",
+   "rank": "c4bb683ecf368c15b51bda98df64721770d4c7362cafb13e8040499be07c7297"
+  },
+  {
+   "dir": "circuit-fibsqrt",
+   "name": "terminal-bench/circuit-fibsqrt",
+   "difficulty": "hard",
+   "category": "software-engineering",
+   "agent_timeout_sec": 3600.0,
+   "verifier_timeout_sec": 3600.0,
+   "docker_image": "alexgshaw/circuit-fibsqrt:20251031",
+   "rank": "fe96e4f3994d70afab03ea49e94e44528d62bc46d839eef6fc14789f71f541c4"
+  },
+  {
+   "dir": "cobol-modernization",
+   "name": "terminal-bench/cobol-modernization",
+   "difficulty": "easy",
+   "category": "software-engineering",
+   "agent_timeout_sec": 900.0,
+   "verifier_timeout_sec": 900.0,
+   "docker_image": "alexgshaw/cobol-modernization:20251031",
+   "rank": "79f22e1dd0d969914bd1b6abf2f201b134b1a969e84c78e0f0a370b719a19380"
+  },
+  {
+   "dir": "code-from-image",
+   "name": "terminal-bench/code-from-image",
+   "difficulty": "medium",
+   "category": "software-engineering",
+   "agent_timeout_sec": 1200.0,
+   "verifier_timeout_sec": 1200.0,
+   "docker_image": "alexgshaw/code-from-image:20251031",
+   "rank": "b6f2c983f461eed90341a60d54976b5dde9e1e07e7329f5593f4675aaf3c36bc"
+  },
+  {
+   "dir": "compile-compcert",
+   "name": "terminal-bench/compile-compcert",
+   "difficulty": "medium",
+   "category": "system-administration",
+   "agent_timeout_sec": 2400.0,
+   "verifier_timeout_sec": 2400.0,
+   "docker_image": "alexgshaw/compile-compcert:20260403",
+   "rank": "a6170e48dceaa978f957029b1b9c7e3131920486cab72521dc81dc1d630459a5"
+  },
+  {
+   "dir": "configure-git-webserver",
+   "name": "terminal-bench/configure-git-webserver",
+   "difficulty": "hard",
+   "category": "system-administration",
+   "agent_timeout_sec": 900.0,
+   "verifier_timeout_sec": 900.0,
+   "docker_image": "alexgshaw/configure-git-webserver:20251031",
+   "rank": "fba90a82a1992bcf1c3bdf55df5b94f8a7b8950a0174788181a59eb4def12b7d"
+  },
+  {
+   "dir": "constraints-scheduling",
+   "name": "terminal-bench/constraints-scheduling",
+   "difficulty": "medium",
+   "category": "personal-assistant",
+   "agent_timeout_sec": 1200.0,
+   "verifier_timeout_sec": 1200.0,
+   "docker_image": "alexgshaw/constraints-scheduling:20251031",
+   "rank": "59642f5186ca99988821f1cca0bb7641cdc5eab9c748d08d741515b401f6aa07"
+  },
+  {
+   "dir": "count-dataset-tokens",
+   "name": "terminal-bench/count-dataset-tokens",
+   "difficulty": "medium",
+   "category": "model-training",
+   "agent_timeout_sec": 900.0,
+   "verifier_timeout_sec": 900.0,
+   "docker_image": "alexgshaw/count-dataset-tokens:20251031",
+   "rank": "c51634d64216bba9a93c8888b270c09d55efb167d333b85e82e173670dfe16a2"
+  },
+  {
+   "dir": "crack-7z-hash",
+   "name": "terminal-bench/crack-7z-hash",
+   "difficulty": "medium",
+   "category": "security",
+   "agent_timeout_sec": 1800.0,
+   "verifier_timeout_sec": 900.0,
+   "docker_image": "alexgshaw/crack-7z-hash:20251031",
+   "rank": "48b11b421d73404ec97fa52b4b369af1dfafda13cc607e0da4440eee0813d7a2"
+  },
+  {
+   "dir": "custom-memory-heap-crash",
+   "name": "terminal-bench/custom-memory-heap-crash",
+   "difficulty": "medium",
+   "category": "debugging",
+   "agent_timeout_sec": 1800.0,
+   "verifier_timeout_sec": 1800.0,
+   "docker_image": "alexgshaw/custom-memory-heap-crash:20251031",
+   "rank": "d7afd40ea248d75447688a82499712ba9f5186b48f9f0c7c62e36d3fe3a5d1fe"
+  },
+  {
+   "dir": "db-wal-recovery",
+   "name": "terminal-bench/db-wal-recovery",
+   "difficulty": "medium",
+   "category": "file-operations",
+   "agent_timeout_sec": 900.0,
+   "verifier_timeout_sec": 900.0,
+   "docker_image": "alexgshaw/db-wal-recovery:20251031",
+   "rank": "3a315076dbbd1868d953cd352e0ea01a0db85a374f4aa79da94e030d7328e1cd"
+  },
+  {
+   "dir": "distribution-search",
+   "name": "terminal-bench/distribution-search",
+   "difficulty": "medium",
+   "category": "machine-learning",
+   "agent_timeout_sec": 3600.0,
+   "verifier_timeout_sec": 3600.0,
+   "docker_image": "alexgshaw/distribution-search:20251031",
+   "rank": "2e2f083696821190d25726b030ed446204e95888371f78cea587f7b87b1d4860"
+  },
+  {
+   "dir": "dna-assembly",
+   "name": "terminal-bench/dna-assembly",
+   "difficulty": "hard",
+   "category": "scientific-computing",
+   "agent_timeout_sec": 1800.0,
+   "verifier_timeout_sec": 1800.0,
+   "docker_image": "alexgshaw/dna-assembly:20251031",
+   "rank": "f58072321d05814ddb3fd702623250d7e713dcf8d9949c7326ae091e512dfbe1"
+  },
+  {
+   "dir": "dna-insert",
+   "name": "terminal-bench/dna-insert",
+   "difficulty": "medium",
+   "category": "scientific-computing",
+   "agent_timeout_sec": 1800.0,
+   "verifier_timeout_sec": 1800.0,
+   "docker_image": "alexgshaw/dna-insert:20251031",
+   "rank": "03ef35996c49ca42231933274551431981e0b53f4d3378cd954d9c0d999ddcf9"
+  },
+  {
+   "dir": "extract-elf",
+   "name": "terminal-bench/extract-elf",
+   "difficulty": "medium",
+   "category": "file-operations",
+   "agent_timeout_sec": 900.0,
+   "verifier_timeout_sec": 900.0,
+   "docker_image": "alexgshaw/extract-elf:20251031",
+   "rank": "ad34c4e50e0fc04493b5e627a70509727fe3470e11095df872424a6bf6ada747"
+  },
+  {
+   "dir": "extract-moves-from-video",
+   "name": "terminal-bench/extract-moves-from-video",
+   "difficulty": "hard",
+   "category": "file-operations",
+   "agent_timeout_sec": 1800.0,
+   "verifier_timeout_sec": 1800.0,
+   "docker_image": "alexgshaw/extract-moves-from-video:20260403",
+   "rank": "488ba10503b49331722a5b7e23c8dbd62c4b88c13f25ddd5d11561f0604f4439"
+  },
+  {
+   "dir": "feal-differential-cryptanalysis",
+   "name": "terminal-bench/feal-differential-cryptanalysis",
+   "difficulty": "hard",
+   "category": "mathematics",
+   "agent_timeout_sec": 1800.0,
+   "verifier_timeout_sec": 1800.0,
+   "docker_image": "alexgshaw/feal-differential-cryptanalysis:20251031",
+   "rank": "164b0cd8e8f09ae935157bad58894a930c98da61f477836a1cada10d888447b1"
+  },
+  {
+   "dir": "feal-linear-cryptanalysis",
+   "name": "terminal-bench/feal-linear-cryptanalysis",
+   "difficulty": "hard",
+   "category": "mathematics",
+   "agent_timeout_sec": 1800.0,
+   "verifier_timeout_sec": 1800.0,
+   "docker_image": "alexgshaw/feal-linear-cryptanalysis:20251031",
+   "rank": "6e46196e1594dd7dc25bf5312391ba9de17ef95d1fbefaa88d617568f654b816"
+  },
+  {
+   "dir": "filter-js-from-html",
+   "name": "terminal-bench/filter-js-from-html",
+   "difficulty": "medium",
+   "category": "security",
+   "agent_timeout_sec": 1800.0,
+   "verifier_timeout_sec": 1800.0,
+   "docker_image": "alexgshaw/filter-js-from-html:20251031",
+   "rank": "8b0beae3319cedfc681968903c8e65ed8e59669f4c26cb5c03c8357fd76932eb"
+  },
+  {
+   "dir": "financial-document-processor",
+   "name": "terminal-bench/financial-document-processor",
+   "difficulty": "medium",
+   "category": "data-processing",
+   "agent_timeout_sec": 1200.0,
+   "verifier_timeout_sec": 1200.0,
+   "docker_image": "alexgshaw/financial-document-processor:20251031",
+   "rank": "32aa60df2302c918b45d9ce15739864d83018110db35efc7c2b441d835b3574c"
+  },
+  {
+   "dir": "fix-code-vulnerability",
+   "name": "terminal-bench/fix-code-vulnerability",
+   "difficulty": "hard",
+   "category": "security",
+   "agent_timeout_sec": 900.0,
+   "verifier_timeout_sec": 900.0,
+   "docker_image": "alexgshaw/fix-code-vulnerability:20251031",
+   "rank": "7b47f53889555d72729c0424f87cba1024492b08ce626ae7b5a984b3ad66e1f9"
+  },
+  {
+   "dir": "fix-git",
+   "name": "terminal-bench/fix-git",
+   "difficulty": "easy",
+   "category": "software-engineering",
+   "agent_timeout_sec": 900.0,
+   "verifier_timeout_sec": 900.0,
+   "docker_image": "alexgshaw/fix-git:20260403",
+   "rank": "00d5be47936b88986c895a3ae2977cae2a4c59292866db40f05d3c85b48d7caa"
+  },
+  {
+   "dir": "fix-ocaml-gc",
+   "name": "terminal-bench/fix-ocaml-gc",
+   "difficulty": "hard",
+   "category": "software-engineering",
+   "agent_timeout_sec": 3600.0,
+   "verifier_timeout_sec": 3600.0,
+   "docker_image": "alexgshaw/fix-ocaml-gc:20251031",
+   "rank": "816bbea6f2572431ec87bb20dcefed18a641c75102afad3981579d3259fdb266"
+  },
+  {
+   "dir": "gcode-to-text",
+   "name": "terminal-bench/gcode-to-text",
+   "difficulty": "medium",
+   "category": "file-operations",
+   "agent_timeout_sec": 900.0,
+   "verifier_timeout_sec": 900.0,
+   "docker_image": "alexgshaw/gcode-to-text:20251031",
+   "rank": "93e22cc0d3104a639c5c78268a277a665fcafcfe240a346336279e08d203e40c"
+  },
+  {
+   "dir": "git-leak-recovery",
+   "name": "terminal-bench/git-leak-recovery",
+   "difficulty": "medium",
+   "category": "software-engineering",
+   "agent_timeout_sec": 900.0,
+   "verifier_timeout_sec": 900.0,
+   "docker_image": "alexgshaw/git-leak-recovery:20251031",
+   "rank": "d5bc579a9c994185f3ff3a4f7fdf6d73cb6c9ff3b68006b863b4293a5a825e7a"
+  },
+  {
+   "dir": "git-multibranch",
+   "name": "terminal-bench/git-multibranch",
+   "difficulty": "medium",
+   "category": "system-administration",
+   "agent_timeout_sec": 900.0,
+   "verifier_timeout_sec": 900.0,
+   "docker_image": "alexgshaw/git-multibranch:20251031",
+   "rank": "ec0ea66e27c6b09fd0c8bfc3ccff6c6364b2b0b779cee57f8c340f62a9c112f0"
+  },
+  {
+   "dir": "gpt2-codegolf",
+   "name": "terminal-bench/gpt2-codegolf",
+   "difficulty": "hard",
+   "category": "software-engineering",
+   "agent_timeout_sec": 900.0,
+   "verifier_timeout_sec": 900.0,
+   "docker_image": "alexgshaw/gpt2-codegolf:20251031",
+   "rank": "ecfd8c6d54c74d7ac4599320a666d24e1c404bc74220b133ccf73eb734c13ed5"
+  },
+  {
+   "dir": "headless-terminal",
+   "name": "terminal-bench/headless-terminal",
+   "difficulty": "medium",
+   "category": "software-engineering",
+   "agent_timeout_sec": 900.0,
+   "verifier_timeout_sec": 900.0,
+   "docker_image": "alexgshaw/headless-terminal:20251031",
+   "rank": "cdfd1ef10ba00edd3b26995273656513e5d7ce118b206af0ae3be42df40a1311"
+  },
+  {
+   "dir": "hf-model-inference",
+   "name": "terminal-bench/hf-model-inference",
+   "difficulty": "medium",
+   "category": "data-science",
+   "agent_timeout_sec": 900.0,
+   "verifier_timeout_sec": 900.0,
+   "docker_image": "alexgshaw/hf-model-inference:20260430",
+   "rank": "a38c25c78a415ea41317dd8d126f72ed344916e28661e52b07b1744b3528060c"
+  },
+  {
+   "dir": "install-windows-3.11",
+   "name": "terminal-bench/install-windows-3.11",
+   "difficulty": "hard",
+   "category": "system-administration",
+   "agent_timeout_sec": 3600.0,
+   "verifier_timeout_sec": 3600.0,
+   "docker_image": "alexgshaw/install-windows-3.11:20251031",
+   "rank": "f69efcebaa0d86043dcbcd6ce31b5fcd3e3011f97420619a3d1cb4cc4c99fad7"
+  },
+  {
+   "dir": "kv-store-grpc",
+   "name": "terminal-bench/kv-store-grpc",
+   "difficulty": "medium",
+   "category": "software-engineering",
+   "agent_timeout_sec": 900.0,
+   "verifier_timeout_sec": 900.0,
+   "docker_image": "alexgshaw/kv-store-grpc:20251031",
+   "rank": "20f621c60eaf52eeee5192630b060ae0f869a6ee14cb7c3ec6e4d91c70886e99"
+  },
+  {
+   "dir": "large-scale-text-editing",
+   "name": "terminal-bench/large-scale-text-editing",
+   "difficulty": "medium",
+   "category": "file-operations",
+   "agent_timeout_sec": 1200.0,
+   "verifier_timeout_sec": 1200.0,
+   "docker_image": "alexgshaw/large-scale-text-editing:20251031",
+   "rank": "3ddc36a71a46aaa7c9f1ef55e97d09ecfabe8bd5cc5295696303ddb32207ee40"
+  },
+  {
+   "dir": "largest-eigenval",
+   "name": "terminal-bench/largest-eigenval",
+   "difficulty": "medium",
+   "category": "mathematics",
+   "agent_timeout_sec": 900.0,
+   "verifier_timeout_sec": 900.0,
+   "docker_image": "alexgshaw/largest-eigenval:20251031",
+   "rank": "fa39236b2110d1ccbb61fb2c20b68c6ddd40c7c8abeb5264bea8afece8b8486d"
+  },
+  {
+   "dir": "llm-inference-batching-scheduler",
+   "name": "terminal-bench/llm-inference-batching-scheduler",
+   "difficulty": "hard",
+   "category": "machine-learning",
+   "agent_timeout_sec": 1800.0,
+   "verifier_timeout_sec": 1800.0,
+   "docker_image": "alexgshaw/llm-inference-batching-scheduler:20251031",
+   "rank": "f6030a8a582d88f3363bc8c0d4effd6dcfcd2b5ceb9842fcf09d04288b34d1ba"
+  },
+  {
+   "dir": "log-summary-date-ranges",
+   "name": "terminal-bench/log-summary-date-ranges",
+   "difficulty": "medium",
+   "category": "data-processing",
+   "agent_timeout_sec": 900.0,
+   "verifier_timeout_sec": 900.0,
+   "docker_image": "alexgshaw/log-summary-date-ranges:20251031",
+   "rank": "5624a3f2a78719f955b326f5d5abcf4354cdc7a6e7208c74e2de77b0dd56eb57"
+  },
+  {
+   "dir": "mailman",
+   "name": "terminal-bench/mailman",
+   "difficulty": "medium",
+   "category": "system-administration",
+   "agent_timeout_sec": 1800.0,
+   "verifier_timeout_sec": 1800.0,
+   "docker_image": "alexgshaw/mailman:20251031",
+   "rank": "8f3933829ccf5befaf1ccf32cbd6cfd591c29e4812e518fb2ab4188386d5a503"
+  },
+  {
+   "dir": "make-doom-for-mips",
+   "name": "terminal-bench/make-doom-for-mips",
+   "difficulty": "hard",
+   "category": "software-engineering",
+   "agent_timeout_sec": 900.0,
+   "verifier_timeout_sec": 900.0,
+   "docker_image": "alexgshaw/make-doom-for-mips:20251031",
+   "rank": "6507cc33a909b4ee5007028b473f9432de1e3c9a5c6d5fe658e4aec5d63670dd"
+  },
+  {
+   "dir": "make-mips-interpreter",
+   "name": "terminal-bench/make-mips-interpreter",
+   "difficulty": "hard",
+   "category": "software-engineering",
+   "agent_timeout_sec": 1800.0,
+   "verifier_timeout_sec": 1800.0,
+   "docker_image": "alexgshaw/make-mips-interpreter:20251031",
+   "rank": "93528052bb2d2d33de1618bfb5b5331b43c62d4f9259898fed3f9d434e45db7b"
+  },
+  {
+   "dir": "mcmc-sampling-stan",
+   "name": "terminal-bench/mcmc-sampling-stan",
+   "difficulty": "hard",
+   "category": "data-science",
+   "agent_timeout_sec": 1800.0,
+   "verifier_timeout_sec": 1800.0,
+   "docker_image": "alexgshaw/mcmc-sampling-stan:20251031",
+   "rank": "8c6070a060dd6436d6e54d3129ad7579197ad04bcb3dbeaefbf94b5c0a44b1e4"
+  },
+  {
+   "dir": "merge-diff-arc-agi-task",
+   "name": "terminal-bench/merge-diff-arc-agi-task",
+   "difficulty": "medium",
+   "category": "debugging",
+   "agent_timeout_sec": 900.0,
+   "verifier_timeout_sec": 900.0,
+   "docker_image": "alexgshaw/merge-diff-arc-agi-task:20251031",
+   "rank": "4b4f5f93320e03282164da29e49a8d7321f2e6c504a74180fa49fedb1c858ed0"
+  },
+  {
+   "dir": "model-extraction-relu-logits",
+   "name": "terminal-bench/model-extraction-relu-logits",
+   "difficulty": "hard",
+   "category": "mathematics",
+   "agent_timeout_sec": 900.0,
+   "verifier_timeout_sec": 900.0,
+   "docker_image": "alexgshaw/model-extraction-relu-logits:20251031",
+   "rank": "72492f541c0343bcda96df8e99fa2654cf7b0fa5134ac8519bc7a1b5fc5c51d5"
+  },
+  {
+   "dir": "modernize-scientific-stack",
+   "name": "terminal-bench/modernize-scientific-stack",
+   "difficulty": "medium",
+   "category": "scientific-computing",
+   "agent_timeout_sec": 600.0,
+   "verifier_timeout_sec": 600.0,
+   "docker_image": "alexgshaw/modernize-scientific-stack:20251031",
+   "rank": "3bf9e8da6359aadcd12ff5669d90b7a05f757176874de777cc596f650fff0593"
+  },
+  {
+   "dir": "mteb-leaderboard",
+   "name": "terminal-bench/mteb-leaderboard",
+   "difficulty": "medium",
+   "category": "data-science",
+   "agent_timeout_sec": 3600.0,
+   "verifier_timeout_sec": 3600.0,
+   "docker_image": "alexgshaw/mteb-leaderboard:20260430",
+   "rank": "7b29122a4649eacf065df518eaec2ccc8e513026c5023b983e51346eb2b10def"
+  },
+  {
+   "dir": "mteb-retrieve",
+   "name": "terminal-bench/mteb-retrieve",
+   "difficulty": "medium",
+   "category": "data-science",
+   "agent_timeout_sec": 1800.0,
+   "verifier_timeout_sec": 1800.0,
+   "docker_image": "alexgshaw/mteb-retrieve:20260430",
+   "rank": "29a9a6a88dec43ee18fbb8734c59bb88ba2a2d0053a6a65c731f58b78b3cfa08"
+  },
+  {
+   "dir": "multi-source-data-merger",
+   "name": "terminal-bench/multi-source-data-merger",
+   "difficulty": "medium",
+   "category": "data-processing",
+   "agent_timeout_sec": 900.0,
+   "verifier_timeout_sec": 900.0,
+   "docker_image": "alexgshaw/multi-source-data-merger:20251031",
+   "rank": "53079615b267f86045b1c871be97f4f49d3af6c6eff5b9deffc7965579c202a5"
+  },
+  {
+   "dir": "nginx-request-logging",
+   "name": "terminal-bench/nginx-request-logging",
+   "difficulty": "medium",
+   "category": "system-administration",
+   "agent_timeout_sec": 900.0,
+   "verifier_timeout_sec": 900.0,
+   "docker_image": "alexgshaw/nginx-request-logging:20251031",
+   "rank": "dc103e22c9a4bb3341d2d866dc7099c3079d1d533c1894f816c48c8c46ba645d"
+  },
+  {
+   "dir": "openssl-selfsigned-cert",
+   "name": "terminal-bench/openssl-selfsigned-cert",
+   "difficulty": "medium",
+   "category": "security",
+   "agent_timeout_sec": 900.0,
+   "verifier_timeout_sec": 900.0,
+   "docker_image": "alexgshaw/openssl-selfsigned-cert:20251031",
+   "rank": "b2a9f7f09fab975800168402fadec1d26de360ae1933761336de69d1ed46d553"
+  },
+  {
+   "dir": "overfull-hbox",
+   "name": "terminal-bench/overfull-hbox",
+   "difficulty": "easy",
+   "category": "debugging",
+   "agent_timeout_sec": 750.0,
+   "verifier_timeout_sec": 360.0,
+   "docker_image": "alexgshaw/overfull-hbox:20260403",
+   "rank": "59905ed8878742f85e0bc2416c4a442a67906938446dcb04e0fefd4bc30f8545"
+  },
+  {
+   "dir": "password-recovery",
+   "name": "terminal-bench/password-recovery",
+   "difficulty": "hard",
+   "category": "security",
+   "agent_timeout_sec": 900.0,
+   "verifier_timeout_sec": 900.0,
+   "docker_image": "alexgshaw/password-recovery:20251031",
+   "rank": "4b471344fce4e080f2ee8496fbc9e6e8d7094eb9863b51b4c001b0243658bf91"
+  },
+  {
+   "dir": "path-tracing",
+   "name": "terminal-bench/path-tracing",
+   "difficulty": "hard",
+   "category": "software-engineering",
+   "agent_timeout_sec": 1800.0,
+   "verifier_timeout_sec": 1800.0,
+   "docker_image": "alexgshaw/path-tracing:20251031",
+   "rank": "0a3b3c9e5b1e825a4fa4609a4a3fe436816694db2a307f1fd98b79bb3582526e"
+  },
+  {
+   "dir": "path-tracing-reverse",
+   "name": "terminal-bench/path-tracing-reverse",
+   "difficulty": "hard",
+   "category": "software-engineering",
+   "agent_timeout_sec": 1800.0,
+   "verifier_timeout_sec": 1800.0,
+   "docker_image": "alexgshaw/path-tracing-reverse:20251031",
+   "rank": "0e2293512c746e74e1b218d9501c3e400df3261b47ad63b1294120676768a424"
+  },
+  {
+   "dir": "polyglot-c-py",
+   "name": "terminal-bench/polyglot-c-py",
+   "difficulty": "medium",
+   "category": "software-engineering",
+   "agent_timeout_sec": 900.0,
+   "verifier_timeout_sec": 900.0,
+   "docker_image": "alexgshaw/polyglot-c-py:20251031",
+   "rank": "37cbdec62201545d9d7bd440c9c68fdaddfbae70bd9002e51c06983e01120531"
+  },
+  {
+   "dir": "polyglot-rust-c",
+   "name": "terminal-bench/polyglot-rust-c",
+   "difficulty": "hard",
+   "category": "software-engineering",
+   "agent_timeout_sec": 900.0,
+   "verifier_timeout_sec": 900.0,
+   "docker_image": "alexgshaw/polyglot-rust-c:20251031",
+   "rank": "00cb6d3eacba2d27cd660d6de076727a7c75ec96077f63a0b8350ed3884641f0"
+  },
+  {
+   "dir": "portfolio-optimization",
+   "name": "terminal-bench/portfolio-optimization",
+   "difficulty": "medium",
+   "category": "optimization",
+   "agent_timeout_sec": 3600.0,
+   "verifier_timeout_sec": 3600.0,
+   "docker_image": "alexgshaw/portfolio-optimization:20251031",
+   "rank": "6359cbdd40fa988cfc596cce56bdf7525123c2176c6fd8bc013273c343dba076"
+  },
+  {
+   "dir": "protein-assembly",
+   "name": "terminal-bench/protein-assembly",
+   "difficulty": "hard",
+   "category": "scientific-computing",
+   "agent_timeout_sec": 1800.0,
+   "verifier_timeout_sec": 1800.0,
+   "docker_image": "alexgshaw/protein-assembly:20260403",
+   "rank": "3f40ce7c775cb043da75b99f4fe7cdc5dfaace8993f154fa3d5689402611261e"
+  },
+  {
+   "dir": "prove-plus-comm",
+   "name": "terminal-bench/prove-plus-comm",
+   "difficulty": "easy",
+   "category": "software-engineering",
+   "agent_timeout_sec": 900.0,
+   "verifier_timeout_sec": 900.0,
+   "docker_image": "alexgshaw/prove-plus-comm:20251031",
+   "rank": "5663bc3b59a6a584619f62503f4019bf048f58fb86bae608a2f453579aeca1e1"
+  },
+  {
+   "dir": "pypi-server",
+   "name": "terminal-bench/pypi-server",
+   "difficulty": "medium",
+   "category": "software-engineering",
+   "agent_timeout_sec": 900.0,
+   "verifier_timeout_sec": 900.0,
+   "docker_image": "alexgshaw/pypi-server:20251031",
+   "rank": "3b37117b42999f6ec67969bfd5939dd32a6f38f7bab864c0fcd99529dcf2cc59"
+  },
+  {
+   "dir": "pytorch-model-cli",
+   "name": "terminal-bench/pytorch-model-cli",
+   "difficulty": "medium",
+   "category": "model-training",
+   "agent_timeout_sec": 900.0,
+   "verifier_timeout_sec": 900.0,
+   "docker_image": "alexgshaw/pytorch-model-cli:20251031",
+   "rank": "e82321d816d4852c181ed8ec343b260cef51d7f0b05e32916288b0fd0a9a5759"
+  },
+  {
+   "dir": "pytorch-model-recovery",
+   "name": "terminal-bench/pytorch-model-recovery",
+   "difficulty": "medium",
+   "category": "model-training",
+   "agent_timeout_sec": 900.0,
+   "verifier_timeout_sec": 900.0,
+   "docker_image": "alexgshaw/pytorch-model-recovery:20260430",
+   "rank": "9aced9cecc5619e9ba95d29a1e2ca4314f7842e0da528f3867b77841865999b9"
+  },
+  {
+   "dir": "qemu-alpine-ssh",
+   "name": "terminal-bench/qemu-alpine-ssh",
+   "difficulty": "medium",
+   "category": "system-administration",
+   "agent_timeout_sec": 900.0,
+   "verifier_timeout_sec": 900.0,
+   "docker_image": "alexgshaw/qemu-alpine-ssh:20251031",
+   "rank": "a2ae2b07dfd7f3570b59ad2ab3bd0a669afae4d92c6002faf12f05b783b95daf"
+  },
+  {
+   "dir": "qemu-startup",
+   "name": "terminal-bench/qemu-startup",
+   "difficulty": "medium",
+   "category": "system-administration",
+   "agent_timeout_sec": 900.0,
+   "verifier_timeout_sec": 900.0,
+   "docker_image": "alexgshaw/qemu-startup:20251031",
+   "rank": "d7e0740285208477ea202acc3d9f8cc9c4f62bec6a5f5de3b9d961de74d2db28"
+  },
+  {
+   "dir": "query-optimize",
+   "name": "terminal-bench/query-optimize",
+   "difficulty": "medium",
+   "category": "data-science",
+   "agent_timeout_sec": 900.0,
+   "verifier_timeout_sec": 1800.0,
+   "docker_image": "alexgshaw/query-optimize:20251031",
+   "rank": "60786443eccf467bce5cdf6716dc01d404f3920ec10b45afe25159cf3bbcc573"
+  },
+  {
+   "dir": "raman-fitting",
+   "name": "terminal-bench/raman-fitting",
+   "difficulty": "medium",
+   "category": "scientific-computing",
+   "agent_timeout_sec": 900.0,
+   "verifier_timeout_sec": 900.0,
+   "docker_image": "alexgshaw/raman-fitting:20251031",
+   "rank": "72c17c8a720d70de9c9bc0c1b0e5454c824ab17202fbedbb9e6ff0128da23891"
+  },
+  {
+   "dir": "regex-chess",
+   "name": "terminal-bench/regex-chess",
+   "difficulty": "hard",
+   "category": "software-engineering",
+   "agent_timeout_sec": 3600.0,
+   "verifier_timeout_sec": 3600.0,
+   "docker_image": "alexgshaw/regex-chess:20251031",
+   "rank": "1c31dfa4eff532c2b7ea2f7572e80a340c0a70a49704e682b2ec49a37bcd02e9"
+  },
+  {
+   "dir": "regex-log",
+   "name": "terminal-bench/regex-log",
+   "difficulty": "medium",
+   "category": "data-processing",
+   "agent_timeout_sec": 900.0,
+   "verifier_timeout_sec": 900.0,
+   "docker_image": "alexgshaw/regex-log:20251031",
+   "rank": "f622b211a54855d29df82b9c288311acc0d78f18a98695a4e166e2d2390e2364"
+  },
+  {
+   "dir": "reshard-c4-data",
+   "name": "terminal-bench/reshard-c4-data",
+   "difficulty": "medium",
+   "category": "data-science",
+   "agent_timeout_sec": 3600.0,
+   "verifier_timeout_sec": 3600.0,
+   "docker_image": "alexgshaw/reshard-c4-data:20251031",
+   "rank": "8381b2afa1b3a64dcc842744cf6c2eeedeb401d9a561b224d85510f3fc901c3a"
+  },
+  {
+   "dir": "rstan-to-pystan",
+   "name": "terminal-bench/rstan-to-pystan",
+   "difficulty": "medium",
+   "category": "data-science",
+   "agent_timeout_sec": 1800.0,
+   "verifier_timeout_sec": 1800.0,
+   "docker_image": "alexgshaw/rstan-to-pystan:20251031",
+   "rank": "69dc6f2778e8c14ca318986eea12bcc840e56f44bc89d1086fc55655ef94da61"
+  },
+  {
+   "dir": "sam-cell-seg",
+   "name": "terminal-bench/sam-cell-seg",
+   "difficulty": "hard",
+   "category": "data-science",
+   "agent_timeout_sec": 7200.0,
+   "verifier_timeout_sec": 7200.0,
+   "docker_image": "alexgshaw/sam-cell-seg:20251031",
+   "rank": "c97fb124612dd968b69b1214f4951f3c9fba7a9ee0aca66902ea22d7eb7d477a"
+  },
+  {
+   "dir": "sanitize-git-repo",
+   "name": "terminal-bench/sanitize-git-repo",
+   "difficulty": "medium",
+   "category": "security",
+   "agent_timeout_sec": 900.0,
+   "verifier_timeout_sec": 900.0,
+   "docker_image": "alexgshaw/sanitize-git-repo:20251031",
+   "rank": "4e81055b91a37b0cd89e7aa795d3ba0fc9f8f14c890aed1402517dc276ea9339"
+  },
+  {
+   "dir": "schemelike-metacircular-eval",
+   "name": "terminal-bench/schemelike-metacircular-eval",
+   "difficulty": "medium",
+   "category": "software-engineering",
+   "agent_timeout_sec": 2400.0,
+   "verifier_timeout_sec": 2400.0,
+   "docker_image": "alexgshaw/schemelike-metacircular-eval:20251031",
+   "rank": "d89316c70d98761bdd7399aaafcc020bcd151a5e9de5887a13771fb99b0ec7b6"
+  },
+  {
+   "dir": "sparql-university",
+   "name": "terminal-bench/sparql-university",
+   "difficulty": "hard",
+   "category": "data-querying",
+   "agent_timeout_sec": 900.0,
+   "verifier_timeout_sec": 900.0,
+   "docker_image": "alexgshaw/sparql-university:20251031",
+   "rank": "01f57a6ff8a89ab41477dc3b02b0d1ed371fb6e33e3559318b7f0d315145d2db"
+  },
+  {
+   "dir": "sqlite-db-truncate",
+   "name": "terminal-bench/sqlite-db-truncate",
+   "difficulty": "medium",
+   "category": "debugging",
+   "agent_timeout_sec": 900.0,
+   "verifier_timeout_sec": 900.0,
+   "docker_image": "alexgshaw/sqlite-db-truncate:20251031",
+   "rank": "3e9032f1cbe202305ebcb858d4cc3c59c0d9ac631a80a8da66f35280c9a5f57f"
+  },
+  {
+   "dir": "sqlite-with-gcov",
+   "name": "terminal-bench/sqlite-with-gcov",
+   "difficulty": "medium",
+   "category": "system-administration",
+   "agent_timeout_sec": 900.0,
+   "verifier_timeout_sec": 900.0,
+   "docker_image": "alexgshaw/sqlite-with-gcov:20251031",
+   "rank": "23495d52acc9662279b6ec1b3a13397e01e5d80d7826eca9428b8d93ade80fda"
+  },
+  {
+   "dir": "torch-pipeline-parallelism",
+   "name": "terminal-bench/torch-pipeline-parallelism",
+   "difficulty": "hard",
+   "category": "software-engineering",
+   "agent_timeout_sec": 900.0,
+   "verifier_timeout_sec": 900.0,
+   "docker_image": "alexgshaw/torch-pipeline-parallelism:20251031",
+   "rank": "e90b3f3fcf93e529dd54bcd9377ee0347c30751af26040674dcdcd2560a69a51"
+  },
+  {
+   "dir": "torch-tensor-parallelism",
+   "name": "terminal-bench/torch-tensor-parallelism",
+   "difficulty": "hard",
+   "category": "software-engineering",
+   "agent_timeout_sec": 900.0,
+   "verifier_timeout_sec": 900.0,
+   "docker_image": "alexgshaw/torch-tensor-parallelism:20251031",
+   "rank": "dc03bc38d580bf1d5f07f68382f5c67f1ed2b71f6549473091990f97ce39d33a"
+  },
+  {
+   "dir": "train-fasttext",
+   "name": "terminal-bench/train-fasttext",
+   "difficulty": "hard",
+   "category": "model-training",
+   "agent_timeout_sec": 3600.0,
+   "verifier_timeout_sec": 3600.0,
+   "docker_image": "alexgshaw/train-fasttext:20251031",
+   "rank": "507fd1845b8cb3a077e6dd6a4eb9259d1553a0c55e7b148c2d4780ca715f86b2"
+  },
+  {
+   "dir": "tune-mjcf",
+   "name": "terminal-bench/tune-mjcf",
+   "difficulty": "medium",
+   "category": "scientific-computing",
+   "agent_timeout_sec": 900.0,
+   "verifier_timeout_sec": 900.0,
+   "docker_image": "alexgshaw/tune-mjcf:20251031",
+   "rank": "a09c195c4fa34359d5425bda4b03a808066b5bc61c63a1da12f580f2341a5c6f"
+  },
+  {
+   "dir": "video-processing",
+   "name": "terminal-bench/video-processing",
+   "difficulty": "hard",
+   "category": "video-processing",
+   "agent_timeout_sec": 3600.0,
+   "verifier_timeout_sec": 3600.0,
+   "docker_image": "alexgshaw/video-processing:20251031",
+   "rank": "e224d7bb5a836da98c380a5f28c1d866bcc0e543d5fbef6ec84bde5744e070de"
+  },
+  {
+   "dir": "vulnerable-secret",
+   "name": "terminal-bench/vulnerable-secret",
+   "difficulty": "medium",
+   "category": "security",
+   "agent_timeout_sec": 900.0,
+   "verifier_timeout_sec": 900.0,
+   "docker_image": "alexgshaw/vulnerable-secret:20251031",
+   "rank": "59fbfc89013c054138b483d05fdd9e6b00bfef7c4883685b5f4a054ec2ba5de0"
+  },
+  {
+   "dir": "winning-avg-corewars",
+   "name": "terminal-bench/winning-avg-corewars",
+   "difficulty": "medium",
+   "category": "software-engineering",
+   "agent_timeout_sec": 3600.0,
+   "verifier_timeout_sec": 3600.0,
+   "docker_image": "alexgshaw/winning-avg-corewars:20251031",
+   "rank": "485ee3d5196280ec1176de976b34511249fa6d34df135db402ee290293a52969"
+  },
+  {
+   "dir": "write-compressor",
+   "name": "terminal-bench/write-compressor",
+   "difficulty": "hard",
+   "category": "software-engineering",
+   "agent_timeout_sec": 900.0,
+   "verifier_timeout_sec": 900.0,
+   "docker_image": "alexgshaw/write-compressor:20251031",
+   "rank": "d4125d1a33d11cbbb1533daf64f449063f1d627aed44cd0efdf286d722b3fa79"
+  }
+ ]
+}

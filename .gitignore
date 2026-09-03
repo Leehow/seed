@@ -24,8 +24,9 @@ bench/harbor/tb21/
 bench/harbor/__pycache__/
 bench/harbor/.env.jellytoken
 
-# keep local, not on GitHub
-bench/
+# keep local, not on GitHub. Anchored: an unanchored `bench/` also matches
+# alm/bench/, which is part of the published artifact.
+/bench/
 tests/
 !tests/
 tests/*
