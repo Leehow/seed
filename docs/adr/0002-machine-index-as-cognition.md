@@ -2,7 +2,11 @@
 
 ## Status
 
-Accepted (2026-08-25)
+Accepted as the current Machine index design (2026-08-25), then reclassified
+as an Agent pack decision by
+[Minimal Seed Runtime and Executable Pack Architecture](../../SEED-SPEC.md)
+(2026-08-25). The index remains valid Agent behavior, but it is no longer part
+of the target bare Seed runtime.
 
 ## Context
 

@@ -1,7 +1,7 @@
 % arXiv: primary cs.AI; cross-list cs.SE, cs.PL
-% Comments: operational semantics for tool-using agent loops; four conformant
-% kernels (CPython, POSIX sh, SQL, ARM64 assembly); conformance, ablation,
-% equivalence, fault-injection and systems measurements
+% Comments: ALM, an operational semantics for tool-using agent loops; four
+% conformant kernels (CPython, POSIX sh, SQL triggers, ARM64 assembly);
+% conformance, ablation, equivalence, fault-injection and systems measurements
 \documentclass[11pt,a4paper]{article}
 \usepackage[margin=1in]{geometry}
 \usepackage{times}
@@ -19,8 +19,9 @@
 \newcommand{\widetable}[1]{\resizebox{\textwidth}{!}{\input{#1}}}
 \emergencystretch=3em
 
-\title{How Small Can an Agent Runtime Be?\\
-       Substrate-Neutral Semantics for Tool-Using LLM Agents}
+\title{The Agent Loop Machine:\\
+       One Semantics, Four Substrates,\\
+       and Where Capability Actually Lives}
 \author{
   Hao Li\\
   Institute of Chemistry, Chinese Academy of Sciences\\
@@ -38,7 +39,7 @@
 An LLM agent run is usually shipped as one program, but it is three functions:
 a model $\mu$, an environment $\varepsilon$, and a kernel $\kappa$ that decides
 what the model sees next, what the budget is, and when the run is over.
-We specify $\kappa$ alone.
+We specify $\kappa$ alone, and then ask what it contributes.
 The Agent Loop Machine (ALM) is an operational semantics for finite-horizon,
 single-agent, observation-dependent tool use, with one unusual normative rule:
 the kernel is \emph{payload-blind}---prompt bytes, tool output and diff hunks
@@ -838,6 +839,45 @@ adapter is given a Python toolchain, while the Seed container is given curl and
 CA certificates. That comparison is a systems report about a production agent
 at $k{=}1$; it is not a leaderboard rank, and it is not a measurement of ALM.
 
+\section{What follows for someone building one}
+\label{sec:implications}
+
+Nothing in this paper tells anyone to write an agent loop in SQL. What the
+measurements do support is a short list of things to spend effort on, and one
+to stop spending it on.
+
+\paragraph{Effort spent on the loop's implementation buys little.}
+Across \tbarmtrials\ Terminal-Bench trials, \subruns\ live witness runs and
+\localn\ graded local runs, no substrate pair was ever judged different, and
+the largest difference we could produce lived in a single repeat. Meanwhile one
+change of model moved the same benchmark by \modeldiff. If a team is deciding
+where to put a week of engineering, the loop is the wrong place; the prompt,
+the model and the tool surface are where the outcome moves.
+
+\paragraph{A loop worth keeping is small enough to specify and test.}
+The kernel here is \almrules\ transition rules over \almfields\ state fields,
+and that is small enough to write a conformance suite for. It was worth it:
+\confcases\ recorded cases caught \mutcaught\ of \muttotal\ seeded mutations,
+including several---an unbounded repair budget, a stale event accepted, a
+history window ignored---that would otherwise surface as rare misbehaviour
+under load rather than as a failing test. Any agent loop can be given the same
+treatment; the payload-blind rule is what makes the cases cheap to record.
+
+\paragraph{Size the error handling to the failure rate you actually have.}
+Bounded repair and retry are worth nothing in a clean world---\fullclean\
+against \norecclean\ at zero fault rate---and \recoverygain\ points at a 10\%
+fault rate. Teams running against a flaky endpoint should not read the first
+number, and teams running against a good one should not pay for machinery
+sized by the second.
+
+\paragraph{Two integration facts that cost us runs.}
+An output budget must cover reasoning tokens, or a reasoning model returns an
+empty completion that looks like a protocol violation and is not. And a model
+that cannot see its own last failure will re-issue it: forbidding commentary
+while also disabling reasoning removed the only channel the model had, and the
+median run went to the step limit \mbox{(80 of 80 steps)} instead of finishing
+in 15.
+
 \section{Limitations}
 
 \begin{itemize}
@@ -907,9 +947,10 @@ computing base by two orders of magnitude. What the core does buy is visible
 elsewhere: feedback, cross-step state and the recursion are load-bearing for
 capability, and bounded repair, retry and idempotency are load-bearing for
 reliability---worth nothing in a clean world and \recoverygain\ points at a
-10\% fault rate. The interesting question about agent runtimes is not how small they can
-be made. It is which of their parts are paying for capability, which for
-reliability, and which for neither.
+10\% fault rate. The useful question about an agent runtime is therefore not how small it can be
+made, but which of its parts are paying for capability, which for reliability,
+and which for neither. On the evidence here the substrate is paying for
+neither, and the parts that are paying can be named.
 
 \section*{Artifacts}
 

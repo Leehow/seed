@@ -7,6 +7,7 @@
   "bash": "bin/bash.exe",
   "seed": "seed/seed.sh",
   "manifest": "manifest.json",
+  "capsule_id_file": "CAPSULE_ID",
   "hashes": "SHA256SUMS",
   "notice": "NOTICE",
   "path_dirs": ["bin"],

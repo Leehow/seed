@@ -571,7 +571,7 @@ url mathrm times alpha lambda kappa varepsilon mathit textsc infty eta sim
 allowbreak small ttfamily families frac left right href verb rule
 dots rightarrow tau text textit ldots quad qquad noindent hline
 widetable resizebox textwidth emergencystretch align footnotesize
-includegraphics centering footnote
+includegraphics centering footnote mbox
 """.split())
 
 

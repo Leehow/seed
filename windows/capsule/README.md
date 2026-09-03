@@ -24,6 +24,7 @@ usr/                # MSYS prefix (ssl, remaining libs)
 etc/                # fstab, nsswitch, profile
 tmp/
 seed/seed.sh        # first-party copy of repo seed.sh (byte-identical)
+CAPSULE_ID          # lock-id + lock digest; launcher cache key
 manifest.json       # generated ids + lock/seed/content hashes
 SHA256SUMS          # sorted per-file hashes of the tree
 NOTICE              # SPDX inventory from the lockfile
@@ -76,6 +77,9 @@ sh build.sh dry-run
 coverage, dependency closure, hex digests, and the launcher layout. It does
 not download anything.
 
+`sh build.sh test` runs archive path-escape and runtime-id unit tests
+(Python 3.10).
+
 `dry-run` is validate plus the pinned download URLs and compressed sizes.
 
 Python 3 is required for metadata. `zstd` is only required for `assemble`.
@@ -112,7 +116,7 @@ What `assemble` does:
 5. Copies `usr/bin/*.exe` and `*.dll` to `bin/` so the launcher always sees
    `bin/sh.exe`.
 6. Copies repo `seed.sh` to `seed/seed.sh` (first-party; not a third-party blob).
-7. Writes `NOTICE`, `manifest.json`, and `SHA256SUMS`.
+7. Writes `NOTICE`, `CAPSULE_ID` (lock id + lock digest), `manifest.json`, and `SHA256SUMS`.
 
 Do **not** `pacman -Syu` inside the assembled tree. Updates are a new locked
 capsule, not an in-place upgrade.

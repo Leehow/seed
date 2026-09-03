@@ -2,7 +2,13 @@
 
 ## Status
 
-Accepted (2026-08-24). Superseded in part by
+Accepted as an implementation record (2026-08-24), but superseded as the
+target architecture by
+[Minimal Seed Runtime and Executable Pack Architecture](../../SEED-SPEC.md)
+(2026-08-25). In particular, "Agent Kernel," prompt-only packs, and the
+cross-pack-invariant admission rule are no longer target decisions.
+
+Superseded in part by
 [0002](0002-machine-index-as-cognition.md) (2026-08-25): the three-layer architecture
 stands, but the Machine index shape it describes — `system.tools` / `system.resources`
 / `system.skills` — is replaced by observations / capabilities / resources plus

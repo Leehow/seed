@@ -10,6 +10,7 @@ import argparse
 import hashlib
 import io
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -25,6 +26,9 @@ CAPSULE_DIR = HERE.parent
 REPO_ROOT = CAPSULE_DIR.parent.parent
 HEX64 = re.compile(r"^[0-9a-f]{64}$")
 DEP_NAME = re.compile(r"^([^<>=]+)")
+# Per-package hard cap. Locked MSYS2 payloads are a few MiB; this is a
+# backstop if csize is missing or a mirror streams unbounded data.
+MAX_PACKAGE_BYTES = 64 * 1024 * 1024
 
 
 def die(msg: str, code: int = 1) -> None:
@@ -60,6 +64,101 @@ def lock_text_digest(path: Path) -> str:
 def dep_name(spec: str) -> str:
     m = DEP_NAME.match(spec.strip())
     return m.group(1) if m else spec
+
+
+def capsule_runtime_id(lock_id: str, lock_digest: str) -> str:
+    """Stable launcher cache identity: lock id + lock digest prefix."""
+    digest = str(lock_digest or "").strip().lower()
+    if not HEX64.match(digest):
+        die(f"lock digest is not 64 hex: {lock_digest!r}")
+    ident = str(lock_id or "").strip()
+    if not ident:
+        die("capsule id is empty")
+    return f"{ident}-{digest[:16]}"
+
+
+def download_size_cap(expected_csize: int) -> int:
+    if not isinstance(expected_csize, int) or expected_csize <= 0:
+        die("csize must be a positive int")
+    if expected_csize > MAX_PACKAGE_BYTES:
+        die(f"csize {expected_csize} exceeds hard cap {MAX_PACKAGE_BYTES}")
+    return expected_csize
+
+
+def _drive_or_unc(path: str) -> bool:
+    if path.startswith("//") or path.startswith("\\\\"):
+        return True
+    lowered = path.replace("\\", "/")
+    if lowered.startswith("//"):
+        return True
+    if lowered.startswith("//?/") or path.startswith("\\\\?\\"):
+        return True
+    if len(path) >= 2 and path[0].isalpha() and path[1] == ":":
+        return True
+    if len(lowered) >= 2 and lowered[0].isalpha() and lowered[1] == ":":
+        return True
+    return False
+
+
+def is_absolute_archive_path(path: str) -> bool:
+    if not path:
+        return False
+    if path.startswith("/") or path.startswith("\\"):
+        return True
+    return _drive_or_unc(path)
+
+
+def normalize_archive_path(name: str) -> str | None:
+    """Return a safe relative POSIX path, or None if the member is unsafe.
+
+    Never uses str.lstrip('./') — that would turn '../x' and '/x' into 'x'
+    while leaving the original tar member name intact for extract().
+    """
+    if name is None:
+        return None
+    raw = str(name)
+    if not raw or "\x00" in raw:
+        return None
+    if is_absolute_archive_path(raw):
+        return None
+    posix = raw.replace("\\", "/")
+    if is_absolute_archive_path(posix):
+        return None
+    parts: list[str] = []
+    for part in posix.split("/"):
+        if part in ("", "."):
+            continue
+        if part == "..":
+            return None
+        if "\x00" in part:
+            return None
+        parts.append(part)
+    if not parts:
+        return None
+    first = parts[0]
+    if len(first) >= 2 and first[1] == ":" and first[0].isalpha():
+        return None
+    return "/".join(parts)
+
+
+def dest_join(root: Path, rel: str) -> Path:
+    out = root
+    for part in rel.split("/"):
+        out = out / part
+    return out
+
+
+def path_is_within(root: Path, target: Path) -> bool:
+    try:
+        root_r = root.resolve()
+        target_r = target.resolve()
+    except OSError:
+        return False
+    try:
+        target_r.relative_to(root_r)
+    except ValueError:
+        return False
+    return True
 
 
 def provides_index(lock: dict) -> dict[str, str]:
@@ -243,17 +342,49 @@ def out_dir(arg: str | None) -> Path:
     return Path(arg).resolve() if arg else (CAPSULE_DIR / "out" / "runtime")
 
 
-def fetch_one(urls: list[str], dest: Path, expected: str) -> None:
+def fetch_one(urls: list[str], dest: Path, expected: str, expected_size: int) -> None:
     dest.parent.mkdir(parents=True, exist_ok=True)
-    if dest.exists() and sha256_file(dest) == expected:
+    cap = download_size_cap(expected_size)
+    if dest.exists() and dest.stat().st_size == expected_size and sha256_file(dest) == expected:
         return
     last_err = "no mirrors"
     for url in urls:
         tmp = dest.with_suffix(dest.suffix + ".part")
         try:
             print(f"fetch {url}", flush=True)
-            with urllib.request.urlopen(url, timeout=90) as resp, tmp.open("wb") as fh:
-                shutil.copyfileobj(resp, fh)
+            with urllib.request.urlopen(url, timeout=90) as resp:
+                cl = resp.headers.get("Content-Length")
+                if cl:
+                    try:
+                        declared = int(cl)
+                    except ValueError:
+                        declared = -1
+                    if declared >= 0 and declared != expected_size:
+                        last_err = f"{url} Content-Length {declared} != csize {expected_size}"
+                        continue
+                    if declared > cap:
+                        last_err = f"{url} Content-Length {declared} exceeds cap {cap}"
+                        continue
+                written = 0
+                overflow = False
+                with tmp.open("wb") as fh:
+                    while True:
+                        chunk = resp.read(1024 * 1024)
+                        if not chunk:
+                            break
+                        written += len(chunk)
+                        if written > cap:
+                            overflow = True
+                            break
+                        fh.write(chunk)
+            if overflow:
+                tmp.unlink(missing_ok=True)
+                last_err = f"{url} exceeded size cap {cap}"
+                continue
+            if written != expected_size:
+                tmp.unlink(missing_ok=True)
+                last_err = f"{url} size {written} != csize {expected_size}"
+                continue
             digest = sha256_file(tmp)
             if digest != expected:
                 tmp.unlink(missing_ok=True)
@@ -272,7 +403,7 @@ def fetch(lock: dict, cache: Path) -> None:
     for name in lock["extract_order"]:
         pkg = lock["packages"][name]
         dest = cache / pkg["filename"]
-        fetch_one(package_urls(lock, pkg), dest, pkg["sha256"])
+        fetch_one(package_urls(lock, pkg), dest, pkg["sha256"], pkg["csize"])
         print(f"ok {pkg['filename']}", flush=True)
 
 
@@ -286,9 +417,11 @@ def zstd_decompress(src: Path) -> bytes:
         die(f"zstd failed for {src.name}: {exc}")
 
 
-def should_skip_member(name: str, prune: list[str], globs: list[str]) -> bool:
-    norm = name.replace("\\", "/").lstrip("./")
-    if not norm or norm.startswith("."):
+def should_skip_member(norm: str, prune: list[str], globs: list[str]) -> bool:
+    if not norm:
+        return True
+    # Package metadata at archive root (.PKGINFO, .MTREE, .BUILDINFO).
+    if "/" not in norm and norm.startswith("."):
         return True
     for prefix in prune:
         if norm == prefix or norm.startswith(prefix.rstrip("/") + "/"):
@@ -300,21 +433,87 @@ def should_skip_member(name: str, prune: list[str], globs: list[str]) -> bool:
     return False
 
 
+def _link_target_within(dest: Path, link_path: Path, linkname: str) -> bool:
+    if not linkname or "\x00" in linkname:
+        return False
+    if is_absolute_archive_path(linkname):
+        return False
+    posix = linkname.replace("\\", "/")
+    if is_absolute_archive_path(posix):
+        return False
+    candidate = link_path.parent
+    for part in posix.split("/"):
+        if part in ("", "."):
+            continue
+        candidate = candidate / part
+    return path_is_within(dest, candidate)
+
+
+def _extract_regular(tf: tarfile.TarFile, member: tarfile.TarInfo, dest_path: Path) -> None:
+    src = tf.extractfile(member)
+    if src is None:
+        die(f"archive member has no data: {member.name}")
+    dest_path.parent.mkdir(parents=True, exist_ok=True)
+    with src, dest_path.open("wb") as fh:
+        shutil.copyfileobj(src, fh)
+
+
+def _extract_member(tf: tarfile.TarFile, member: tarfile.TarInfo, dest: Path, norm: str) -> None:
+    dest_path = dest_join(dest, norm)
+    if not path_is_within(dest, dest_path.parent if dest_path != dest else dest_path):
+        die(f"refusing path escape: {member.name}")
+    if member.isdir():
+        dest_path.mkdir(parents=True, exist_ok=True)
+        if not path_is_within(dest, dest_path):
+            die(f"refusing path escape: {member.name}")
+        return
+    dest_path.parent.mkdir(parents=True, exist_ok=True)
+    if not path_is_within(dest, dest_path.parent):
+        die(f"refusing path escape: {member.name}")
+    if member.issym():
+        if not _link_target_within(dest, dest_path, member.linkname or ""):
+            die(f"refusing symlink escape: {member.name} -> {member.linkname}")
+        if dest_path.exists() or dest_path.is_symlink():
+            dest_path.unlink()
+        os.symlink(member.linkname, dest_path)
+        return
+    if member.islnk():
+        target_norm = normalize_archive_path(member.linkname or "")
+        if target_norm is None:
+            die(f"refusing hardlink escape: {member.name} -> {member.linkname}")
+        target = dest_join(dest, target_norm)
+        if not target.is_file() or target.is_symlink() or not path_is_within(dest, target):
+            die(f"refusing hardlink escape: {member.name} -> {member.linkname}")
+        if dest_path.exists() or dest_path.is_symlink():
+            dest_path.unlink()
+        os.link(target, dest_path)
+        return
+    if member.isreg() or member.isfile():
+        _extract_regular(tf, member, dest_path)
+        if not path_is_within(dest, dest_path):
+            dest_path.unlink(missing_ok=True)
+            die(f"refusing path escape: {member.name}")
+        return
+    # Devices, fifos, and other specials are not part of the capsule.
+
+
 def safe_extract(tf: tarfile.TarFile, dest: Path, prune: list[str], globs: list[str]) -> None:
     dest = dest.resolve()
+    dest.mkdir(parents=True, exist_ok=True)
     for member in tf.getmembers():
-        name = member.name.replace("\\", "/").lstrip("./")
-        if should_skip_member(name, prune, globs):
-            continue
-        target = (dest / name).resolve()
-        if dest != target and dest not in target.parents:
-            die(f"refusing path escape: {member.name}")
-        if member.issym() or member.islnk():
-            # Recreate relative links only; skip absolute / escaping links.
-            link = member.linkname or ""
-            if link.startswith("/") or ".." in Path(link).parts:
+        raw = member.name or ""
+        norm = normalize_archive_path(raw)
+        if norm is None:
+            posix = raw.replace("\\", "/")
+            parts = [p for p in posix.split("/") if p and p != "."]
+            if not parts:
                 continue
-        tf.extract(member, path=dest, set_attrs=False)
+            die(f"refusing path escape: {raw}")
+        if should_skip_member(norm, prune, globs):
+            continue
+        # Never pass the original TarInfo to TarFile.extract — member.name
+        # may still contain ../, drive, or UNC after a naive strip.
+        _extract_member(tf, member, dest, norm)
 
 
 def copy_bin_layer(runtime: Path) -> None:
@@ -376,9 +575,11 @@ def write_runtime_manifest(
     content_digest = sha256_bytes(
         "".join(f"{digest}  {path}\n" for digest, path in sums).encode("utf-8")
     )
+    runtime_id = capsule_runtime_id(lock["capsule"]["id"], lock_digest)
     manifest = {
         "schema_version": 1,
         "capsule_id": lock["capsule"]["id"],
+        "runtime_id": runtime_id,
         "arch": lock["capsule"]["arch"],
         "host_os": "windows",
         "runtime_shell": "sh",
@@ -411,10 +612,12 @@ def write_runtime_manifest(
         "".join(f"{digest}  {path}\n" for digest, path in sums),
         encoding="utf-8",
     )
+    id_name = layout.get("capsule_id_file") or "CAPSULE_ID"
+    (runtime / id_name).write_text(f"{runtime_id}\n", encoding="utf-8")
 
 
 def hashed_files(runtime: Path) -> list[tuple[str, str]]:
-    skip = {"SHA256SUMS", "manifest.json"}
+    skip = {"SHA256SUMS", "manifest.json", "CAPSULE_ID"}
     rows: list[tuple[str, str]] = []
     for path in sorted(p for p in runtime.rglob("*") if p.is_file()):
         rel = path.relative_to(runtime).as_posix()
@@ -474,6 +677,7 @@ def assemble(lock: dict, layout: dict, cache: Path, runtime: Path, lock_digest: 
     sums = hashed_files(runtime)
     write_runtime_manifest(lock, layout, runtime, lock_digest, seed_sha, sums)
     print(f"assembled {runtime}")
+    print(f"runtime_id={capsule_runtime_id(lock['capsule']['id'], lock_digest)}")
     print(f"seed_sha256={seed_sha}")
     print(f"files={len(sums)}")
 
