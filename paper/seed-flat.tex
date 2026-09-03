@@ -13,7 +13,7 @@
 \usepackage[T1]{fontenc}
 \usepackage[utf8]{inputenc}
 
-\input{gen/macros}
+%% macros expanded below; see alm/paper_tables.py
 
 % Tables generated from results files are wide; scale rather than overflow.
 \newcommand{\widetable}[1]{\resizebox{\textwidth}{!}{\input{#1}}}
@@ -48,29 +48,29 @@ What is left is a transition table over small integers and short tokens.
 We implement it four times on deliberately unlike substrates---CPython, POSIX
 \texttt{/bin/sh}, SQL triggers, and ARM64 assembly---and test whether they are
 the same machine rather than four similar programs.
-On \confcases\ recorded conformance cases the four kernels produce
-byte-identical canonical traces (\confdisagree\ disagreements over \confruns\
+On 350recorded conformance cases the four kernels produce
+byte-identical canonical traces (0disagreements over 700\
 runs) and match a separately written, table-driven oracle record for record;
-\mutcaught\ of \muttotal\ seeded semantic mutations of the reference kernel
+17of 17seeded semantic mutations of the reference kernel
 are caught.
 Holding $\mu$, $\varepsilon$, the prompt bytes and the budget fixed, per-task
-success rates across the four substrates differ by at most \localmaxdiff\ on
-graded shell work and \submaxdiff\ on a live stochastic suite, inside a
-pre-registered $\pm5$\,pp equivalence band; on \tbarmtrials\ Terminal-Bench 2.1
+success rates across the four substrates differ by at most 0.015on
+graded shell work and 0.000on a live stochastic suite, inside a
+pre-registered $\pm5$\,pp equivalence band; on 801Terminal-Bench 2.1
 trials under the official verifier the three container-capable substrates
-differ by at most \tbmaxdiff, no pair judged different, and that largest
+differ by at most 0.052, no pair judged different, and that largest
 difference lives entirely in one of the three repeats. Swapping the model
 for one from another vendor, with the kernel and everything else held byte
-identical, moves the same measurement by \modeldiff---roughly \modelratio\
+identical, moves the same measurement by -0.234---roughly 4\
 times as much as swapping the substrate does.
 Ablations show what the core is for: removing observation feedback,
 cross-step state, or the recursion collapses success on witness families built
 so that no controller lacking that piece can be right on every instance, and
 bounded repair and retry are worth nothing at fault rate $0$ but
-$+\recoverygain$\,pp at $10\%$.
-The four kernels span $\throughputspread\times$ in transition throughput and
-$\tcbspread\times$ in trusted computing base, yet the slowest is
-\slowestshare\% of one model call.
+$+28$\,pp at $10\%$.
+The four kernels span $1656\times$ in transition throughput and
+$196\times$ in trusted computing base, yet the slowest is
+0.71\% of one model call.
 Orchestration substrate is operationally necessary and no longer
 performance-dominant.
 \end{abstract}
@@ -120,7 +120,7 @@ $\varepsilon$---so that any difference between them is the kernel's.
 explicit claim boundary, a wire format narrow enough to parse by byte scan, and
 a canonical trace that makes two kernels comparable in one hash.
 \item \textbf{Four conformant kernels} (\S\ref{sec:kernels}) on substrates that
-share almost nothing, and a \confcases-case conformance suite that is
+share almost nothing, and a 350-case conformance suite that is
 mutation-tested so that passing it means something (\S\ref{sec:h1}).
 \item \textbf{Necessity witnesses} (\S\ref{sec:h4}): four task families that
 separate feedback, cross-step state, recursion and stopping, each reported
@@ -234,7 +234,7 @@ untouched.
 
 \subsection{Transitions}
 
-There are \almrules\ transition rules, plus start and the two ignore rules;
+There are 9transition rules, plus start and the two ignore rules;
 we state the ones that carry the argument and refer to the specification for
 the rest. Table~\ref{tab:coverage} lists all twelve with how often the
 conformance suite fires each.
@@ -299,7 +299,7 @@ to matter for writing the assembly kernel.
 \label{sec:kernels}
 
 All four implement both profiles (\emph{core}, and the \emph{ext} ablation
-knobs) and pass the same suite. The shared adapter is \adapterloc\ logical
+knobs) and pass the same suite. The shared adapter is 343logical
 lines and identical bytes for every kernel, so it cancels in all comparisons.
 
 \paragraph{\texttt{py} --- CPython.} The readable reference. It exists to be
@@ -353,7 +353,16 @@ comparison in this paper crosses them.
 \caption{Models. Decoding parameters are recorded rather than assumed,
 because endpoints differ in what they accept.}
 \label{tab:models}
-\input{gen/tab-models}
+\begin{tabular}{llll}
+\toprule
+key & vendor & model id & decoding \\
+\midrule
+deepseek-flash & deepseek & \texttt{deepseek-v4-flash} & temperature 0, reasoning disabled \\
+deepseek-pro & deepseek & \texttt{deepseek-v4-pro} & temperature 0, reasoning disabled \\
+grok-high & xai-via-local-relay & \texttt{grok-4.5-high} & temperature 0 \\
+grok-low & xai-via-local-relay & \texttt{grok-4.5-low} & temperature 0 \\
+\bottomrule
+\end{tabular}
 \end{table}
 
 We attempted a third model from a different vendor and failed twice, in ways
@@ -379,33 +388,40 @@ separates ``this arm cannot work'' from ``this model could not cope''.
 \label{sec:h1}
 
 \begin{table}[h]\centering\small
-\caption{Conformance. \confcases\ recorded cases, \confruns\ kernel runs,
-\confwall s wall. Cases are generated from a table-driven derivation of the
+\caption{Conformance. 350recorded cases, 700kernel runs,
+2.4 s wall. Cases are generated from a table-driven derivation of the
 transition rules, written separately from any kernel and by the same author; a
 kernel passes a case only if its effect stream and its canonical trace match
 that oracle record for record. Agreement with it is therefore evidence that
 four substrates implement one specification, not that the specification is
 right.}
 \label{tab:conformance}
-\input{gen/tab-conformance}
+\begin{tabular}{lrrrrrrrr}
+\toprule
+kernel & branch & budget & envfault & ext & idempotency & normal & protocol & total \\
+\midrule
+\texttt{py} & 50/50 & 50/50 & 50/50 & 50/50 & 50/50 & 50/50 & 50/50 & \textbf{350/350} \\
+\texttt{sh} & 50/50 & 50/50 & 50/50 & 50/50 & 50/50 & 50/50 & 50/50 & \textbf{350/350} \\
+\bottomrule
+\end{tabular}
 \end{table}
 
 All four kernels pass every case, and the cross-kernel trace-hash disagreement
-count is \confdisagree. The agreement is not merely on outcomes: it is on the
+count is 0. The agreement is not merely on outcomes: it is on the
 budget after every transition, on which refs each model request carried, and on
 which events were ignored.
 
 \paragraph{A second platform.}
-The numbers above come from one host. Running the same \confcases\ cases
-unchanged inside a Terminal-Bench task container---\containerplatform, CPython
-\containerpython, SQLite \containersqlite, on linux/amd64 emulated over an
-arm64 host---gives \containerruns\ more runs and the same result
+The numbers above come from one host. Running the same 350cases
+unchanged inside a Terminal-Bench task container---Linux x86\_64, CPython
+3.13.12, SQLite 3.40.1, on linux/amd64 emulated over an
+arm64 host---gives 1050more runs and the same result
 (Table~\ref{tab:conformancecontainer}). The assembly kernel is not in that
 table because the image is amd64; built from the same source with \texttt{cc}
-in a linux/arm64 container it passes all \confcases\ cases there too. This is worth a paragraph because it
+in a linux/arm64 container it passes all 350cases there too. This is worth a paragraph because it
 caught a real portability bug rather than confirming a belief: the relational
 kernel had been written against SQLite's ordered \texttt{group\_concat}, which
-landed in 3.44, while the task images ship \containersqlite. Unordered
+landed in 3.44, while the task images ship 3.40.1. Unordered
 \texttt{group\_concat} would have been a silent wrong answer---the ref list is
 a sequence, not a set---so the window is now walked with a recursive CTE,
 available since 3.8.3.
@@ -413,15 +429,23 @@ available since 3.8.3.
 \begin{table}[h]\centering\small
 \caption{The same cases inside a Terminal-Bench task container.}
 \label{tab:conformancecontainer}
-\input{gen/tab-conformance-container}
+\begin{tabular}{lr}
+\toprule
+kernel & cases passed \\
+\midrule
+\texttt{py} & 350/350 \\
+\texttt{sh} & 350/350 \\
+\texttt{sql} & 350/350 \\
+\bottomrule
+\end{tabular}
 \end{table}
 
 \paragraph{Can the suite fail?}
 A suite that four kernels pass is worthless unless it can reject a broken one.
-We apply \muttotal\ single semantic mutations to the reference kernel---each a
+We apply 17single semantic mutations to the reference kernel---each a
 plausible mistake, not a syntax error---and count how many cases catch each
-(Table~\ref{tab:mutants}). \mutcaught\ of \muttotal\ are caught, the weakest by
-\mutmin\ cases.
+(Table~\ref{tab:mutants}). 17of 17are caught, the weakest by
+10cases.
 
 The interesting result here is a failure. In the first version the suite was
 entirely \emph{core} profile, and the mutant that appends observations even
@@ -434,7 +458,29 @@ found a second hole, a rule fired by zero cases.
 \begin{table}[h]\centering\small
 \caption{Mutation testing of the conformance suite.}
 \label{tab:mutants}
-\widetable{gen/tab-mutants}
+\resizebox{\textwidth}{!}{\begin{tabular}{llrr}
+\toprule
+mutation & what it breaks & cases failing & rate \\
+\midrule
+\texttt{budget-never-spent} & steps\_left is not decremented on a tool response & 317 & 90.6\% \\
+\texttt{repairs-unbounded} & protocol repair ignores its budget & 65 & 18.6\% \\
+\texttt{retries-unbounded} & transport retry ignores its budget & 27 & 7.7\% \\
+\texttt{accepts-stale-eid} & an event answering an old effect is processed & 24 & 6.9\% \\
+\texttt{terminal-not-absorbing} & events after final are processed again & 50 & 14.3\% \\
+\texttt{feedback-always-on} & the observation is appended even when feedback is off & 17 & 4.9\% \\
+\texttt{history-unbounded} & history\_max is ignored when selecting refs & 45 & 12.9\% \\
+\texttt{repair-loses-note} & a protocol repair does not show the model its error & 42 & 12.0\% \\
+\texttt{retry-appends-note} & a transport retry pretends the model answered & 18 & 5.1\% \\
+\texttt{transport-is-repair} & a failed model call is charged to the repair budget & 10 & 2.9\% \\
+\texttt{step-never-advances} & the step counter stays at 1 & 307 & 87.7\% \\
+\texttt{attempt-never-resets} & attempt is not reset at a new step & 46 & 13.1\% \\
+\texttt{budget-off-by-one} & the run stops one step early & 101 & 28.9\% \\
+\texttt{halt-status-dropped} & the model's own verdict is not recorded & 32 & 9.1\% \\
+\texttt{allow-halt-ignored} & the fixed-horizon knob is not honoured & 13 & 3.7\% \\
+\texttt{refused-halt-spends-repair} & a refused halt is charged to the repair budget & 13 & 3.7\% \\
+\texttt{unknown-action-repaired} & an unrecognised action is guessed at instead of ignored & 26 & 7.4\% \\
+\bottomrule
+\end{tabular}}
 \end{table}
 
 \section{H4: what the core is for}
@@ -457,16 +503,47 @@ are still gradeable.
 per family, four kernels. No model is involved, so these numbers are properties
 of the arm.}
 \label{tab:oracle}
-\input{gen/tab-witness-oracle}
+\begin{tabular}{lrrrrr}
+\toprule
+family & full & fixed horizon & no feedback & no history & one shot \\
+\midrule
+\texttt{feedback\_required} & 1.00 & 1.00 & 0.06 & 0.06 & 0.20 \\
+\texttt{recovery\_required} & 1.00 & 1.00 & 0.00 & 0.00 & 0.00 \\
+\texttt{state\_required} & 1.00 & 1.00 & 0.00 & 0.00 & 0.00 \\
+\texttt{unknown\_horizon} & 1.00 & 1.00 & 0.18 & 0.18 & 0.00 \\
+\bottomrule
+\end{tabular}
 \end{table}
 
 \begin{table}[h]\centering\small
 \caption{The same matrix with live models.}
 \label{tab:witnesslive}
-\input{gen/tab-witness-live}
+\begin{tabular}{lrrrrr}
+\toprule
+family & full & fixed horizon & no feedback & no history & one shot \\
+\midrule
+\multicolumn{6}{l}{\emph{deepseek-flash}, 50 instances per family} \\
+\texttt{feedback\_required} & 1.00 & 1.00 & 0.00 & 0.00 & 0.00 \\
+\texttt{recovery\_required} & 1.00 & 1.00 & 0.00 & 0.00 & 0.00 \\
+\texttt{state\_required} & 1.00 & 1.00 & 0.00 & 0.00 & 0.00 \\
+\texttt{unknown\_horizon} & 1.00 & 1.00 & 0.00 & 0.00 & 0.00 \\
+\midrule
+\multicolumn{6}{l}{\emph{deepseek-pro}, 15 instances per family} \\
+\texttt{feedback\_required} & 1.00 & -- & 0.20 & 0.00 & 0.00 \\
+\texttt{recovery\_required} & 1.00 & -- & 0.00 & 0.00 & 0.00 \\
+\texttt{state\_required} & 1.00 & -- & 0.00 & 0.00 & 0.00 \\
+\texttt{unknown\_horizon} & 1.00 & -- & 0.00 & 0.00 & 0.00 \\
+\midrule
+\multicolumn{6}{l}{\emph{grok-low}, 50 instances per family} \\
+\texttt{feedback\_required} & 1.00 & 1.00 & 0.06 & 0.00 & 0.00 \\
+\texttt{recovery\_required} & 1.00 & 1.00 & 0.00 & 0.00 & 0.00 \\
+\texttt{state\_required} & 1.00 & 1.00 & 0.00 & 0.00 & 0.00 \\
+\texttt{unknown\_horizon} & 1.00 & 1.00 & 0.00 & 0.00 & 0.00 \\
+\bottomrule
+\end{tabular}
 \end{table}
 
-Of \liveruns\ live ablation runs, \livecapped\ hit the adapter's
+Of 3440live ablation runs, 357hit the adapter's
 model-call cap, all of them in ablated arms: without the information it needs,
 a model does not stop, it keeps acting.
 
@@ -474,14 +551,23 @@ a model does not stop, it keeps acting.
 \caption{Arm comparisons against \texttt{full}, paired by instance,
 10{,}000-resample task-clustered bootstrap, $\pm5$\,pp equivalence band.}
 \label{tab:armequiv}
-\input{gen/tab-arm-equiv}
+\begin{tabular}{lrrlll}
+\toprule
+arm & rate & diff vs full & 95\% CI & verdict & p (Holm) \\
+\midrule
+fixed\_horizon & 1.000 & +0.000 & [+0.000, +0.000] & equivalent & 1 \\
+no\_feedback & 0.060 & +0.940 & [+0.905, +0.970] & different & 1.53e-56 \\
+no\_history & 0.060 & +0.940 & [+0.905, +0.970] & different & 1.53e-56 \\
+one\_shot & 0.050 & +0.950 & [+0.920, +0.980] & different & 5.1e-57 \\
+\bottomrule
+\end{tabular}
 \end{table}
 
 Removing feedback, history or the recursion does not degrade these arms; it
 removes the information on which correctness depends, and the measured rates
 sit at the guessing ceiling. The variance share attributable to the arm is
-\oracleetaarm, against \oracleetafamily\ for the family and
-\oracleetakernel\ for the substrate.
+0.869, against 0.005for the family and
+0.000for the substrate.
 
 \paragraph{An honest non-result.}
 \texttt{fixed\_horizon}---a kernel that refuses to let the model halt---loses
@@ -496,40 +582,110 @@ state and the recursion; it does not rest on halting.
 \label{sec:h2}
 
 \begin{table}[h]\centering\small
-\caption{Live witness suite, \texttt{full} arm, \subreps\ repeats, \subruns\
+\caption{Live witness suite, \texttt{full} arm, 3repeats, 2400\
 runs. pass$^k$ is the unbiased ``succeeds $k$ times out of $k$'' estimator.}
 \label{tab:subpassk}
-\input{gen/tab-substrate-passk}
+\begin{tabular}{lrrrr}
+\toprule
+kernel & runs & rate & pass$^1$ & pass$^3$ \\
+\midrule
+\texttt{asm} & 600 & 1.000 & 1.000 & 1.000 \\
+\texttt{py} & 600 & 1.000 & 1.000 & 1.000 \\
+\texttt{sh} & 600 & 1.000 & 1.000 & 1.000 \\
+\texttt{sql} & 600 & 1.000 & 1.000 & 1.000 \\
+\bottomrule
+\end{tabular}
 \end{table}
 
 \begin{table}[h]\centering\small
 \caption{Pairwise substrate equivalence on the live witness suite.}
 \label{tab:subequiv}
-\input{gen/tab-substrate-equiv}
+\begin{tabular}{llrrrlll}
+\toprule
+A & B & rate A & rate B & diff & 95\% CI & verdict & p (Holm) \\
+\midrule
+\texttt{asm} & \texttt{py} & 1.000 & 1.000 & +0.000 & [+0.000, +0.000] & equivalent & 1 \\
+\texttt{asm} & \texttt{sh} & 1.000 & 1.000 & +0.000 & [+0.000, +0.000] & equivalent & 1 \\
+\texttt{asm} & \texttt{sql} & 1.000 & 1.000 & +0.000 & [+0.000, +0.000] & equivalent & 1 \\
+\texttt{py} & \texttt{sh} & 1.000 & 1.000 & +0.000 & [+0.000, +0.000] & equivalent & 1 \\
+\texttt{py} & \texttt{sql} & 1.000 & 1.000 & +0.000 & [+0.000, +0.000] & equivalent & 1 \\
+\texttt{sh} & \texttt{sql} & 1.000 & 1.000 & +0.000 & [+0.000, +0.000] & equivalent & 1 \\
+\bottomrule
+\end{tabular}
 \end{table}
 
 \begin{table}[h]\centering\small
-\caption{Local end-to-end tasks: \localtasks\ graded shell tasks with real
-setup and real verifiers, $\times$ 4 substrates $\times$ \nmodels\ models
-$\times$ \localreps\ repeats $=$ \localn\ runs. Grading is on environment state
+\caption{Local end-to-end tasks: 24graded shell tasks with real
+setup and real verifiers, $\times$ 4 substrates $\times$ 4models
+$\times$ 5repeats $=$ 1920runs. Grading is on environment state
 by a verifier script, not on the agent's report.}
 \label{tab:localtask}
-\input{gen/tab-local-task}
+\begin{tabular}{lrrrr}
+\toprule
+task & deepseek-flash & deepseek-pro & grok-high & grok-low \\
+\midrule
+\texttt{c-build} & 1.00 & 1.00 & 1.00 & 1.00 \\
+\texttt{cli-args} & 1.00 & 1.00 & 1.00 & 1.00 \\
+\texttt{count-lines} & 1.00 & 1.00 & 1.00 & 1.00 \\
+\texttt{csv-filter} & 1.00 & 1.00 & 1.00 & 1.00 \\
+\texttt{dedupe-csv} & 1.00 & 0.00 & 1.00 & 1.00 \\
+\texttt{dep-error} & 0.93 & 0.96 & 1.00 & 1.00 \\
+\texttt{dir-tree} & 1.00 & 1.00 & 1.00 & 1.00 \\
+\texttt{env-default} & 1.00 & 1.00 & 1.00 & 1.00 \\
+\texttt{exact-edit} & 0.00 & 0.50 & 1.00 & 1.00 \\
+\texttt{fix-python} & 1.00 & 1.00 & 1.00 & 1.00 \\
+\texttt{fix-shebang} & 1.00 & 1.00 & 1.00 & 1.00 \\
+\texttt{grep-count} & 1.00 & 1.00 & 1.00 & 1.00 \\
+\texttt{hello-file} & 1.00 & 1.00 & 1.00 & 1.00 \\
+\texttt{json-extract} & 1.00 & 1.00 & 1.00 & 1.00 \\
+\texttt{make-executable} & 1.00 & 1.00 & 1.00 & 1.00 \\
+\texttt{patch-config} & 0.14 & 1.00 & 1.00 & 1.00 \\
+\texttt{pipeline-report} & 1.00 & 1.00 & 1.00 & 1.00 \\
+\texttt{rename-ext} & 1.00 & 1.00 & 1.00 & 1.00 \\
+\texttt{sort-uniq} & 1.00 & 1.00 & 1.00 & 1.00 \\
+\texttt{sqlite-query} & 1.00 & 1.00 & 1.00 & 1.00 \\
+\texttt{sum-json} & 1.00 & 1.00 & 1.00 & 1.00 \\
+\texttt{tar-roundtrip} & 0.00 & 1.00 & 1.00 & 1.00 \\
+\texttt{two-file-refactor} & 1.00 & 0.93 & 1.00 & 1.00 \\
+\texttt{word-count} & 1.00 & 1.00 & 1.00 & 1.00 \\
+\textbf{all} & \textbf{0.878} & \textbf{0.933} & \textbf{1.000} & \textbf{1.000} \\
+\bottomrule
+\end{tabular}
 \end{table}
 
 \begin{table}[h]\centering\small
-\caption{The same runs by substrate. pass$^\localpassk$ is computed per
+\caption{The same runs by substrate. pass$^5$ is computed per
 (task, model) cell, so a substrate that got lucky once does not read as
 consistent.}
 \label{tab:localkernel}
-\input{gen/tab-local-kernel}
+\begin{tabular}{lrrrrrr}
+\toprule
+substrate & deepseek-flash & deepseek-pro & grok-high & grok-low & all & pass$^5$ \\
+\midrule
+\texttt{asm} & 0.881 & 0.952 & 1.000 & 1.000 & 0.942 & 0.902 \\
+\texttt{py} & 0.881 & 0.940 & 1.000 & 1.000 & 0.938 & 0.881 \\
+\texttt{sh} & 0.875 & 0.917 & 1.000 & 1.000 & 0.927 & 0.866 \\
+\texttt{sql} & 0.875 & 0.923 & 1.000 & 1.000 & 0.929 & 0.866 \\
+\bottomrule
+\end{tabular}
 \end{table}
 
 \begin{table}[h]\centering\small
 \caption{Pairwise substrate equivalence on graded shell work, paired by task,
 pooled over models.}
 \label{tab:localequiv}
-\input{gen/tab-local-equiv}
+\begin{tabular}{llrrrlll}
+\toprule
+A & B & rate A & rate B & diff & 95\% CI & verdict & p (Holm) \\
+\midrule
+\texttt{asm} & \texttt{py} & 0.942 & 0.938 & +0.004 & [-0.004, +0.015] & equivalent & 1 \\
+\texttt{asm} & \texttt{sh} & 0.942 & 0.927 & +0.015 & [+0.002, +0.033] & equivalent & 1 \\
+\texttt{asm} & \texttt{sql} & 0.942 & 0.929 & +0.013 & [+0.000, +0.031] & equivalent & 1 \\
+\texttt{py} & \texttt{sh} & 0.938 & 0.927 & +0.010 & [+0.000, +0.023] & equivalent & 1 \\
+\texttt{py} & \texttt{sql} & 0.938 & 0.929 & +0.008 & [+0.000, +0.019] & equivalent & 1 \\
+\texttt{sh} & \texttt{sql} & 0.927 & 0.929 & -0.002 & [-0.006, +0.000] & equivalent & 1 \\
+\bottomrule
+\end{tabular}
 \end{table}
 
 The claim being tested is equivalence, not absence of significance. ``We found
@@ -541,7 +697,7 @@ Sample size was set by that rule rather than by taste, and the first attempt
 failed it. With 12 tasks at 3 repeats the paired bootstrap CI was wider than
 the band and three of the six pairs returned \emph{inconclusive}---a statement
 about the experiment, not about substrates. Doubling the suite to
-\localtasks\ tasks and raising repeats to \localreps\ narrowed the interval
+24tasks and raising repeats to 5narrowed the interval
 enough for a verdict. We report this because ``inconclusive'' is the outcome a
 pre-registered band is for, and because the fix is more data rather than a
 wider band.
@@ -552,7 +708,7 @@ wider band.
 The local suite cannot carry this comparison. Its model levels changed protocol
 at the same time they changed vendor, so model and prompt are confounded in it,
 and on the current model it is saturated anyway---all four substrates resolve
-every one of its \localn\ runs. A ceiling separates nothing.
+every one of its 1920runs. A ceiling separates nothing.
 
 So the model factor is measured where there is headroom: one substrate, one
 protocol, the same 89 Terminal-Bench tasks, \texttt{qwen3.8-max} against
@@ -564,20 +720,27 @@ budget and the task set fixed. The second row removes the tasks where the
 slower model ran out of wall clock, because a timeout is not the same kind of
 failure as a wrong answer.}
 \label{tab:modelfactor}
-\widetable{gen/tab-model-factor}
+\resizebox{\textwidth}{!}{\begin{tabular}{lrrrrll}
+\toprule
+stratum & tasks & qwen3.8-max & grok-4.5-low & diff & 95\% CI & CI excludes 0 \\
+\midrule
+all tasks & 89 & 0.258 & 0.493 & -0.234 & [-0.339, -0.129] & yes \\
+slower model did not time out & 60 & 0.383 & 0.547 & -0.164 & [-0.294, -0.036] & yes \\
+\bottomrule
+\end{tabular}}
 \end{table}
 
-Changing the vendor moved the resolved rate by \modeldiff. That headline mixes
-two things: the slower model timed out on \modeltimeouts\ of the 89 tasks, and
+Changing the vendor moved the resolved rate by -0.234. That headline mixes
+two things: the slower model timed out on 29of the 89 tasks, and
 a timeout is a wall-clock failure rather than a competence failure. Stratifying
 separates them---on the tasks where it never ran out of time the gap is still
-\modeldiffnt, with a 95\% interval that excludes zero---and the faster model
+-0.164, with a 95\% interval that excludes zero---and the faster model
 resolves the tasks the slower one timed out on at close to its own average
 rate, so those are not simply the hard tasks being reshuffled into one column.
 
 Set that beside the substrate comparison on the same arm, where no pair
-differed by more than \tbmaxdiff\ and none was ever judged different:
-\textbf{changing the model moved the outcome by roughly \modelratio\ times as
+differed by more than 0.052and none was ever judged different:
+\textbf{changing the model moved the outcome by roughly 4times as
 much as changing the substrate did.} That is the paper's claim in one
 comparison, and it is measured rather than argued.
 
@@ -630,22 +793,39 @@ on the model factor (\S\ref{sec:h3}).
 \texttt{br} is \texttt{b} with an output budget wide enough for a model that
 reasons before it answers.}
 \label{tab:tbarms}
-\widetable{gen/tab-tb-arms}
+\resizebox{\textwidth}{!}{\begin{tabular}{llrrrrrl}
+\toprule
+model & protocol & tasks & substrates & repeats & trials & resolved & role \\
+\midrule
+\texttt{deepseek-v4-flash} & \texttt{a (terse)} & 89 & 3 & 5 & 1263 & \textbf{0.171} & retired on cost \\
+\texttt{deepseek-v4-flash} & \texttt{b (reasoned)} & 89 & 3 & 1 & 266 & \textbf{0.199} & prompt contrast \\
+\texttt{grok-4.5-low} & \texttt{br} & 89 & 3 & 3 & 791 & \textbf{0.465} & substrate comparison \\
+\texttt{qwen3.8-max} & \texttt{br} & 89 & 1 & 1 & 89 & \textbf{0.258} & model factor \\
+\bottomrule
+\end{tabular}}
 \end{table}
 
 \begin{table}[h]\centering\small
-\caption{\tbtrials\ trials: \tbtasks\ tasks $\times$ 3 substrates $\times$
-\tbreps\ repeats. Rates are over scored trials.}
+\caption{2461trials: 89tasks $\times$ 3 substrates $\times$
+1repeats. Rates are over scored trials.}
 \label{tab:tb}
-\input{gen/tab-tb}
+\begin{tabular}{lrrrrrr}
+\toprule
+substrate & rep 0 & rep 1 & rep 2 & all & resolved & pass$^3$ \\
+\midrule
+\texttt{py} & 0.461 & 0.483 & 0.384 & \textbf{0.443} & 116/262 & 0.286 \\
+\texttt{sh} & 0.477 & 0.471 & 0.539 & \textbf{0.496} & 131/264 & 0.360 \\
+\texttt{sql} & 0.494 & 0.404 & 0.471 & \textbf{0.457} & 121/265 & 0.345 \\
+\bottomrule
+\end{tabular}
 \end{table}
 
 \paragraph{What was excluded, and why it matters.}
 Two kinds of failure end up in the same result file and must not be pooled.
 An agent that runs out of wall clock has failed, and is scored~0. An
 environment that will not build has not told us anything about the agent, and
-is dropped. \tbexcluded\ trials were dropped and \tbagentfault\ were scored~0
-under that rule (Table~\ref{tab:tbexclusions}); \tbexcludedfirstrep\ of the
+is dropped. 10trials were dropped and 23were scored~0
+under that rule (Table~\ref{tab:tbexclusions}); 1of the
 exclusions land in repeat~0, nearly all of them \texttt{docker compose}
 failures while the host pulled 60\,GB of task images for the first time. That
 is a reason to report repeats separately rather than to average them away, and
@@ -655,14 +835,31 @@ because it is worse or because its first pass ran during an image storm.
 \begin{table}[h]\centering\small
 \caption{Disposition of the trials that did not simply pass or fail.}
 \label{tab:tbexclusions}
-\input{gen/tab-tb-exclusions}
+\begin{tabular}{llr}
+\toprule
+disposition & outcome & trials \\
+\midrule
+excluded & \texttt{VerifierTimeoutError} & 8 \\
+excluded & \texttt{no\_reward} & 2 \\
+scored 0 & \texttt{AgentTimeoutError} & 22 \\
+scored 0 & \texttt{NonZeroAgentExitCodeError} & 1 \\
+\bottomrule
+\end{tabular}
 \end{table}
 
 \begin{table}[h]\centering\small
 \caption{Pairwise equivalence on Terminal-Bench, paired by task, pooled over
 repeats, 10{,}000-resample cluster bootstrap, pre-registered $\pm5$\,pp band.}
 \label{tab:tbequiv}
-\input{gen/tab-tb-equiv}
+\begin{tabular}{llrrrlll}
+\toprule
+A & B & rate A & rate B & diff & 95\% CI & verdict & p (Holm) \\
+\midrule
+\texttt{py} & \texttt{sh} & 0.440 & 0.493 & -0.052 & [-0.105, -0.004] & inconclusive & 0.355 \\
+\texttt{py} & \texttt{sql} & 0.440 & 0.455 & -0.015 & [-0.073, +0.045] & inconclusive & 1 \\
+\texttt{sh} & \texttt{sql} & 0.493 & 0.455 & +0.037 & [-0.011, +0.086] & inconclusive & 0.359 \\
+\bottomrule
+\end{tabular}
 \end{table}
 
 \begin{table}[h]\centering\small
@@ -670,13 +867,21 @@ repeats, 10{,}000-resample cluster bootstrap, pre-registered $\pm5$\,pp band.}
 that is real should persist across repeats; one that lives in a single repeat
 is the model being unstable on hard tasks.}
 \label{tab:tbperrep}
-\input{gen/tab-tb-perrep}
+\begin{tabular}{lrrr}
+\toprule
+repeat & py $-$ sh & py $-$ sql & sh $-$ sql \\
+\midrule
+0 & -0.017 & -0.034 & -0.017 \\
+1 & +0.011 & +0.078 & +0.067 \\
+2 & -0.156 & -0.088 & +0.068 \\
+\bottomrule
+\end{tabular}
 \end{table}
 
 \paragraph{The result, stated as it came out.}
-Of the three pairs, \tbequiv\ are \emph{equivalent}, \tbinconclusive\ are
-\emph{inconclusive}, and \tbdifferent\ is \emph{different}. The largest point
-difference is \tbmaxdiff, and its interval reaches just past the band, so the
+Of the three pairs, 0are \emph{equivalent}, 3are
+\emph{inconclusive}, and 0is \emph{different}. The largest point
+difference is 0.052, and its interval reaches just past the band, so the
 pre-registered rule does not let us certify equivalence. McNemar finds no
 significant difference on any pair (smallest Holm-adjusted $p$ is 0.36).
 
@@ -696,19 +901,19 @@ not enough resolution to certify its absence at $\pm5$\,pp on this benchmark at
 this sample size.
 
 That the intervals are wide is not a defect of the design so much as a
-property of the operating point. The substrates disagree on \tbdisagree\ of
-\tbtasks\ tasks, always by one or two repeats out of three and in both
+property of the operating point. The substrates disagree on 37of
+89tasks, always by one or two repeats out of three and in both
 directions, with nothing concentrated on any substrate---the signature of a
 model that is unstable on hard tasks rather than of a runtime that is worse.
-Only \tbeveryone\ tasks are solved by every substrate on every repeat, and only
-\tbsomeone\ are solved by anything at all: with a two-primitive kernel, no
+Only 21tasks are solved by every substrate on every repeat, and only
+62are solved by anything at all: with a two-primitive kernel, no
 exam-style delivery prompting, and this model, most of Terminal-Bench 2.1 is
 out of reach, and a low base rate with high per-task variance is exactly the
 regime in which $\pm5$\,pp is expensive to certify.
 
 \paragraph{What moved the absolute rate.}
-Between the first arm and the second the resolved rate went from \tbarmone\ to
-\tbarmtwo. Every step of that came from the adapter or the model; the kernels,
+Between the first arm and the second the resolved rate went from 0.171to
+0.465. Every step of that came from the adapter or the model; the kernels,
 the ABI and the two primitives were untouched, and the substrate verdicts are
 unaffected because all three substrates always share one adapter, byte for
 byte.
@@ -734,7 +939,7 @@ clean abort---the kernel doing exactly what \S\ref{sec:alm} says while the
 adapter fed it a broken URL.}
 
 The interesting part is the size of the correction relative to what it did not
-fix. Removing the loop is worth \tbpromptdiff\ on the same 89 tasks: real, and
+fix. Removing the loop is worth +0.028on the same 89 tasks: real, and
 an order of magnitude less than the gap to a mature harness. The loop was
 burning steps that were not going to solve those tasks anyway.
 
@@ -756,20 +961,40 @@ runtime's problem.
 \caption{Fault surface. \texttt{no\_repair}, \texttt{no\_retry} and
 \texttt{no\_recovery} remove the corresponding budgets from the kernel.}
 \label{tab:faults}
-\input{gen/tab-faults}
+\begin{tabular}{lrrrrrr}
+\toprule
+arm & $\lambda$ & runs & success & model calls/run & redelivered/run & duplicate effects \\
+\midrule
+\texttt{full} & 0.0 & 800 & 1.000 & 3.52 & 0.00 & 0 \\
+\texttt{full} & 0.01 & 800 & 1.000 & 3.64 & 0.06 & 0 \\
+\texttt{full} & 0.05 & 800 & 1.000 & 4.28 & 0.37 & 0 \\
+\texttt{full} & 0.1 & 800 & 1.000 & 5.08 & 0.98 & 0 \\
+\texttt{full} & 0.3 & 800 & 0.930 & 7.72 & 3.86 & 0 \\
+\texttt{full} & 0.5 & 800 & 0.520 & 7.96 & 5.89 & 0 \\
+\texttt{no\_recovery} & 0.0 & 800 & 1.000 & 3.52 & 0.00 & 0 \\
+\texttt{no\_recovery} & 0.1 & 800 & 0.720 & 3.12 & 0.56 & 0 \\
+\texttt{no\_recovery} & 0.3 & 800 & 0.305 & 2.48 & 1.05 & 0 \\
+\texttt{no\_repair} & 0.0 & 800 & 1.000 & 3.52 & 0.00 & 0 \\
+\texttt{no\_repair} & 0.1 & 800 & 0.850 & 3.63 & 0.64 & 0 \\
+\texttt{no\_repair} & 0.3 & 800 & 0.505 & 3.60 & 1.64 & 0 \\
+\texttt{no\_retry} & 0.0 & 800 & 1.000 & 3.52 & 0.00 & 0 \\
+\texttt{no\_retry} & 0.1 & 800 & 0.840 & 4.21 & 0.78 & 0 \\
+\texttt{no\_retry} & 0.3 & 800 & 0.515 & 4.30 & 2.04 & 0 \\
+\bottomrule
+\end{tabular}
 \end{table}
 
 Three results. First, bounded repair and retry buy \emph{nothing} in a clean
-world (\fullclean\ against \norecclean\ at $\lambda=0$) and
-$+\recoverygain$\,pp at $\lambda=0.10$ (\fullten\ against \norecten). Second, dropping them makes runs
+world (1.000against 1.000at $\lambda=0$) and
+$+28$\,pp at $\lambda=0.10$ (1.000against 0.720). Second, dropping them makes runs
 \emph{cheaper} in model calls, because a run that aborts early spends fewer:
 the wrong way to read a cost table, and a good illustration of why efficiency
 numbers without an outcome column are misleading. Third, across the sweep
-\faultredelivered\ events were redelivered and \faultdup\ produced a duplicate
+14288events were redelivered and 0produced a duplicate
 side effect, on every substrate---absorbing redelivery is a property of the
 specification, not of one implementation.
 
-At $\lambda=0.5$ the full arm falls to \fullfifty. The core's error handling is
+At $\lambda=0.5$ the full arm falls to 0.520. The core's error handling is
 bounded on purpose; it converts an unreliable world into a slower one up to a
 point, and then reports \texttt{protocol\_exhausted} rather than pretending.
 
@@ -783,7 +1008,16 @@ standard-library modules they import, not the whole install. Libraries in the
 macOS dyld shared cache have no file on disk and count as zero, so \texttt{sh}
 and \texttt{asm} are understated by libSystem.}
 \label{tab:systems}
-\widetable{gen/tab-systems}
+\resizebox{\textwidth}{!}{\begin{tabular}{llrrrrrrrr}
+\toprule
+kernel & substrate & src KiB & gzip KiB & LOC & TCB KiB & cold ms & warm p50 ms & transitions/s & peak RSS MiB \\
+\midrule
+\texttt{py} & cpython 3 & 9.1 & 2.6 & 212 & 6801.6 & 16.5 & 17.1 & 177,139 & 21.8 \\
+\texttt{sh} & POSIX /bin/sh & 6.8 & 2.2 & 180 & 98.7 & 6.4 & 7.2 & 2,975 & 2.5 \\
+\texttt{sql} & SQLite relational & 15.1 & 3.3 & 239 & 7141.3 & 37.2 & 32.9 & 280 & 104.8 \\
+\texttt{asm} & ARM64 assembly & 39.6 & 7.2 & 1330 & 36.5 & 6.0 & 2.8 & 463,755 & 1.7 \\
+\bottomrule
+\end{tabular}}
 \end{table}
 
 ``Cold'' is the first invocation of a run, whose pages, dynamic-linker caches
@@ -796,8 +1030,8 @@ Quoting kernel-only bytes alone is how an assembly kernel becomes ``a 9\,KB
 agent'' while a JSON parser and libc sit underneath it; quoting only the TCB
 hides the thing the paper is about. Lines of code appear last and with a
 warning: one line of SQL, shell and assembly are not the same unit. The
-substrate-independent complexity numbers are \almrules\ transition rules and
-\almfields\ mutable control-state fields, fixed by the specification and
+substrate-independent complexity numbers are 9transition rules and
+13mutable control-state fields, fixed by the specification and
 implemented in full by each kernel.
 
 \begin{table}[h]\centering\small
@@ -805,15 +1039,27 @@ implemented in full by each kernel.
 is neither the model call nor the tool: prompt rendering, the ABI round trip,
 and the kernel.}
 \label{tab:cost}
-\widetable{gen/tab-cost}
+\resizebox{\textwidth}{!}{\begin{tabular}{llrrrrrrr}
+\toprule
+suite & model & runs & $T_{model}$ & $T_{tool}$ & $T_{orch}$ & orch ms/step & prompt tok/run & completion tok/run \\
+\midrule
+local tasks & deepseek-flash & 672 & 92.2\% & 7.5\% & 0.37\% & 3 & 6853 & 253 \\
+local tasks & deepseek-pro & 672 & 81.1\% & 18.6\% & 0.37\% & 6 & 1532 & 95 \\
+local tasks & grok-high & 288 & 99.1\% & 0.7\% & 0.15\% & 7 & 4945 & 775 \\
+local tasks & grok-low & 288 & 98.9\% & 0.9\% & 0.17\% & 7 & 4196 & 501 \\
+witness ablations & deepseek-flash & 1600 & 99.5\% & 0.0\% & 0.47\% & 3 & 2932 & 39 \\
+witness ablations & deepseek-pro & 240 & 99.5\% & 0.0\% & 0.52\% & 6 & 1142 & 16 \\
+witness ablations & grok-low & 1600 & 99.9\% & 0.0\% & 0.06\% & 4 & 5041 & 2817 \\
+\bottomrule
+\end{tabular}}
 \end{table}
 
 Figure~\ref{fig:pareto} puts the two sizes and the outcomes on one plot.
-The four kernels span \throughputspread$\times$ in transition throughput, and
+The four kernels span 1656$\times$ in transition throughput, and
 that spread is almost invisible end to end: the slowest kernel costs
-\slowestus\,$\mu$s per transition, or \slowestshare\% of a 500\,ms model call,
-and measured orchestration time is \orchshare\ of wall clock across every
-live run in this paper, against \modelshare\ spent waiting for the model.
+3561\,$\mu$s per transition, or 0.71\% of a 500\,ms model call,
+and measured orchestration time is 0.13\%of wall clock across every
+live run in this paper, against 98.8\%spent waiting for the model.
 This is the quantitative form of the paper's central negative result.
 Orchestration substrate is operationally necessary---something has to hold the
 budget, the phase and the idempotency---and it is no longer where the time
@@ -849,25 +1095,25 @@ measurements do support is a short list of things to spend effort on, and one
 to stop spending it on.
 
 \paragraph{Effort spent on the loop's implementation buys little.}
-Across \tbarmtrials\ Terminal-Bench trials, \subruns\ live witness runs and
-\localn\ graded local runs, no substrate pair was ever judged different, and
+Across 801Terminal-Bench trials, 2400live witness runs and
+1920graded local runs, no substrate pair was ever judged different, and
 the largest difference we could produce lived in a single repeat. Meanwhile one
-change of model moved the same benchmark by \modeldiff. If a team is deciding
+change of model moved the same benchmark by -0.234. If a team is deciding
 where to put a week of engineering, the loop is the wrong place; the prompt,
 the model and the tool surface are where the outcome moves.
 
 \paragraph{A loop worth keeping is small enough to specify and test.}
-The kernel here is \almrules\ transition rules over \almfields\ state fields,
+The kernel here is 9transition rules over 13state fields,
 and that is small enough to write a conformance suite for. It was worth it:
-\confcases\ recorded cases caught \mutcaught\ of \muttotal\ seeded mutations,
+350recorded cases caught 17of 17seeded mutations,
 including several---an unbounded repair budget, a stale event accepted, a
 history window ignored---that would otherwise surface as rare misbehaviour
 under load rather than as a failing test. Any agent loop can be given the same
 treatment; the payload-blind rule is what makes the cases cheap to record.
 
 \paragraph{Size the error handling to the failure rate you actually have.}
-Bounded repair and retry are worth nothing in a clean world---\fullclean\
-against \norecclean\ at zero fault rate---and \recoverygain\ points at a 10\%
+Bounded repair and retry are worth nothing in a clean world---1.000\
+against 1.000at zero fault rate---and 28points at a 10\%
 fault rate. Teams running against a flaky endpoint should not read the first
 number, and teams running against a good one should not pay for machinery
 sized by the second.
@@ -883,7 +1129,7 @@ in 15.
 \section{Limitations}
 
 \begin{itemize}
-\item The end-to-end task evidence is \localtasks\ local tasks and four witness
+\item The end-to-end task evidence is 24local tasks and four witness
 families, not a 89-task container benchmark. The Terminal-Bench matrix is
 pre-registered and unrun (\S\ref{sec:notrun}); until it is run, H2 is
 established on smaller and easier work than the community standard.
@@ -942,13 +1188,13 @@ linux/amd64.
 Separating $\kappa$ from $\mu$ and $\varepsilon$, and forbidding $\kappa$ to
 read payload bytes, leaves an agent loop small enough to write in assembly and
 in SQL triggers, and precise enough that four such implementations agree on
-every one of \confcases\ recorded cases, trace record by trace record. Holding
+every one of 350recorded cases, trace record by trace record. Holding
 the model and the environment fixed, which of them runs the loop does not
 measurably change what the agent accomplishes, while it changes the trusted
 computing base by two orders of magnitude. What the core does buy is visible
 elsewhere: feedback, cross-step state and the recursion are load-bearing for
 capability, and bounded repair, retry and idempotency are load-bearing for
-reliability---worth nothing in a clean world and \recoverygain\ points at a
+reliability---worth nothing in a clean world and 28points at a
 10\% fault rate. The useful question about an agent runtime is therefore not how small it can be
 made, but which of its parts are paying for capability, which for reliability,
 and which for neither. On the evidence here the substrate is paying for
@@ -968,7 +1214,24 @@ and the generated result tables: \url{https://github.com/Leehow/seed} under
 \caption{Every transition in the specification and how often the suite fires
 it. Generated with the cases.}
 \label{tab:coverage}
-\input{gen/tab-coverage}
+\begin{tabular}{llrr}
+\toprule
+rule & specification & trace records & cases \\
+\midrule
+\texttt{start} & s4.1 start & 350 & 350 \\
+\texttt{tool} & s4.2 model calls a tool & 1195 & 317 \\
+\texttt{halt} & s4.3 model halts & 204 & 204 \\
+\texttt{halt\_disabled} & s8 halt refused (ext) & 23 & 13 \\
+\texttt{repair} & s4.5 protocol repair & 62 & 45 \\
+\texttt{abort\_protocol} & s4.5 repairs exhausted & 35 & 35 \\
+\texttt{retry} & s4.5 transport retry & 23 & 18 \\
+\texttt{abort\_transport} & s4.5 retries exhausted & 13 & 13 \\
+\texttt{observe} & s4.4 observation, run continues & 1097 & 307 \\
+\texttt{abort\_budget} & s4.4 budget exhausted & 98 & 98 \\
+\texttt{stale\_event} & s4.6 event ignored & 384 & 50 \\
+\texttt{after\_terminal} & s4.6 event after terminal & 102 & 50 \\
+\bottomrule
+\end{tabular}
 \end{table}
 
 \bibliographystyle{plain}

@@ -34,6 +34,11 @@ plt.rcParams.update({
 
 LABEL = {"py": "CPython", "sh": "POSIX sh", "sql": "SQLite", "asm": "ARM64 asm"}
 MARK = {"py": "o", "sh": "s", "sql": "^", "asm": "D"}
+# Four points, two tight pairs: asm/sh differ by under 3x on the x axis and
+# py/sql by 6%, so a single offset rule cannot separate them. Placed by hand:
+# (dx, dy, horizontal alignment) in points.
+LABEL_POS = {"asm": (8, -14, "left"), "sh": (8, 5, "left"),
+             "py": (-8, -14, "right"), "sql": (8, 5, "left")}
 
 
 def wilson(k, n, z=1.96):
@@ -50,7 +55,13 @@ def main():
     os.makedirs(GEN, exist_ok=True)
     sysd = load("systems/results.json")
     local = load_all("bench/results-local-*.jsonl*") or []
-    tb = [r for r in (load("bench/results-tb.jsonl") or []) if r["scored"]]
+    # ONE arm, always. Pooling the retired deepseek arm with the grok arm puts a
+    # point on the plot that describes neither: py reads 0.256 pooled against
+    # 0.443 on the arm the substrate claim is actually made from.
+    MAIN_ARM = ("grok-low", "br")
+    tb_all = [r for r in (load("bench/results-tb.jsonl") or []) if r["scored"]]
+    tb = [r for r in tb_all
+          if (r.get("model_key", "deepseek-flash"), r["prompt"]) == MAIN_ARM]
     if not (sysd and local and tb):
         sys.exit("need systems/results.json, the local task results and the TB results")
 
@@ -65,8 +76,13 @@ def main():
         ax.errorbar(tcb, rate, yerr=[[rate - lo], [hi - rate]], fmt=MARK[kid],
                     ms=5, capsize=2.5, lw=1, color="#222222", mfc="white",
                     mew=1.1, ecolor="#888888")
+        # py and sql sit within 6% of each other on the x axis, and asm and sh
+        # within a factor of three, so centred labels collide. Alternate the
+        # side instead of the height: on a log axis a horizontal nudge is small
+        # in data terms and keeps every label next to its own marker.
+        dx, dy, ha = LABEL_POS.get(kid, (0, 8, "center"))
         ax.annotate(LABEL[kid], (tcb, rate), textcoords="offset points",
-                    xytext=(0, 10), ha="center", fontsize=7.5)
+                    xytext=(dx, dy), ha=ha, fontsize=7.5)
         tsel = [r for r in tb if r["kernel"] == kid]
         if tsel:
             tn, ts = len(tsel), sum(r["success"] for r in tsel)
@@ -78,7 +94,7 @@ def main():
     ax.set_xscale("log")
     ax.set_xlabel("trusted computing base (KiB, log scale)")
     ax.set_ylabel("tasks resolved")
-    ax.set_ylim(0, 1.08)
+    ax.set_ylim(0, 1.18)
     ax.plot([], [], "o", color="#222222", mfc="white", mew=1.1,
             label="local graded tasks")
     ax.plot([], [], "o", color="#4c72b0", label="Terminal-Bench 2.1")
@@ -88,7 +104,7 @@ def main():
 
     # (b) effect sizes on one axis: what actually moved the outcome, measured
     # on the same arm, the same tasks and the same protocol.
-    sc = [r for r in tb if r["prompt"] == "br" and r["kernel"] == "sh"]
+    sc = [r for r in tb_all if r["prompt"] == "br" and r["kernel"] == "sh"]
     Q = {r["task"]: r["success"] for r in sc if r.get("model_key") == "qwen-max"}
     G = collections.defaultdict(list)
     for r in sc:
@@ -100,7 +116,7 @@ def main():
 
     per = collections.defaultdict(lambda: collections.defaultdict(list))
     for r in tb:
-        if r["prompt"] == "br" and r.get("model_key") == "grok-low" and r["scored"]:
+        if True:
             per[r["kernel"]][r["task"]].append(r["success"])
     ks = sorted(per)
     sub_eff = 0.0
@@ -112,7 +128,7 @@ def main():
             sub_eff = max(sub_eff, d)
 
     prompts = {}
-    for r in tb:
+    for r in tb_all:
         if r["scored"] and r.get("model_key") == "deepseek-flash":
             prompts.setdefault(r["prompt"], []).append(r["success"])
     prompt_eff = (abs(sum(prompts["b"]) / len(prompts["b"])
