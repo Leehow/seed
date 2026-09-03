@@ -55,6 +55,32 @@ def num(x, d=3):
     return ("%%.%df" % d) % x
 
 
+def step_latency():
+    """Median wall-clock seconds per agent step on the scored TB trials.
+
+    The results file records a trial's total agent time; the step count comes
+    from the canonical trace via trace-stats.jsonl. Dividing one by the other
+    gives what a step actually cost, which is the honest denominator for "how
+    much of a step does the kernel account for".
+    """
+    import statistics
+    steps = {}
+    for r in load("bench/trace-stats.jsonl") or []:
+        steps.setdefault((r["task"], r["kernel"], r["prompt"]), []).append(r["steps"])
+    if not steps:
+        return None
+    vals = []
+    for r in load("bench/results-tb.jsonl") or []:
+        if not (r.get("scored") and r.get("agent_seconds")):
+            continue
+        k = (r["task"], r["kernel"], r["prompt"])
+        if k in steps:
+            n = statistics.median(steps[k])
+            if n > 0:
+                vals.append(r["agent_seconds"] / n)
+    return (statistics.median(vals), len(vals)) if vals else None
+
+
 def main():
     os.makedirs(GEN, exist_ok=True)
 
@@ -271,7 +297,13 @@ def main():
                                     key=lambda kv: -kv[1]["eta2"])])
         mac("localn", len(local))
         mac("localtasks", len(tasks))
-        mac("localreps", len(local) // max(1, len(tasks) * len(kernels) * len(lmodels)))
+        # Repeats differ by arm (the arms that ran first ran more). An average
+        # over unequal arms is a number no arm actually ran, so report the
+        # range the reader can check against the per-model tables.
+        rc = sorted({len({r["rep"] for r in local if r["model"] == m})
+                     for m in lmodels})
+        mac("localreps", str(rc[0]) if len(rc) == 1 else
+            "%d--%d" % (rc[0], rc[-1]))
         mac("localmaxdiff", num(max(abs(r["diff"]) for r in res)))
 
     # ---------------- Terminal-Bench --------------------------------------
@@ -441,7 +473,9 @@ def main():
             sub_max = max(abs(r["diff"]) for r in pairwise(
                 [r for r in tb if r["scored"] and r["prompt"] == "br"
                  and r.get("model_key") == "grok-low"], "kernel", "task"))
-            mac("modelratio", "%.0f" % (abs(e_all["diff"]) / max(0.001, sub_max)))
+            # One decimal: 4.5 printed with %.0f rounds to 4 and understates
+            # the ratio the sentence is about.
+            mac("modelratio", "%.1f" % (abs(e_all["diff"]) / max(0.001, sub_max)))
 
         mac("tbdisagree", len([t for t, k in by.items()
                                if len({sum(v) for v in k.values()}) > 1]))
@@ -542,9 +576,26 @@ def main():
         mac("throughputspread", "%.0f" % (fast["throughput"]["transitions_per_s"] /
                                           slow["throughput"]["transitions_per_s"]))
         mac("slowestus", "%.0f" % slow["throughput"]["per_transition_us"])
-        mac("slowestshare", "%.2f" % (slow["throughput"]["per_transition_us"] / 5000.0))
+        # Percent of a model call. 500 ms is a deliberately conservative stand-in
+        # -- the step latency we actually measured is an order of magnitude
+        # larger, so the conservative figure is the one quoted first.
+        us = slow["throughput"]["per_transition_us"]
+        mac("slowestshare", "%.2f" % (us / 500e3 * 100))
+        obs = step_latency()
+        if obs:
+            med, n = obs
+            mac("stepwall", "%.1f" % med)
+            mac("stepwalln", str(n))
+            mac("slowestshareobs", "%.2f" % (us / (med * 1e6) * 100))
         tcbs = [k["tcb"]["resolvable_bytes"] for k in sysd["kernels"].values()]
         mac("tcbspread", "%.0f" % (max(tcbs) / max(1, min(tcbs))))
+        # The forking-vs-assignment measurement lives in its own file so it
+        # cannot contaminate the four-kernel spread figures above.
+        vf = load("systems/variant-shfork.json")
+        if vf:
+            mac("forkrate", str(vf["measured"]["forking"]["transitions_per_s"]))
+            mac("norforkrate", str(vf["measured"]["assignment"]["transitions_per_s"]))
+            mac("forkspeedup", "%g" % vf["speedup"])
         mac("almrules", sysd["alm"]["rules"])
         mac("almfields", sysd["alm"]["state_fields"])
         mac("adapterloc", sysd["shared_adapter"]["logical_loc"])

@@ -61,7 +61,7 @@ trials under the official verifier the three container-capable substrates
 differ by at most 0.052, no pair judged different, and that largest
 difference lives entirely in one of the three repeats. Swapping the model
 for one from another vendor, with the kernel and everything else held byte
-identical, moves the same measurement by -0.234---roughly 4\
+identical, moves the same measurement by -0.234---roughly 4.5\
 times as much as swapping the substrate does.
 Ablations show what the core is for: removing observation feedback,
 cross-step state, or the recursion collapses success on witness families built
@@ -70,7 +70,8 @@ bounded repair and retry are worth nothing at fault rate $0$ but
 $+28$\,pp at $10\%$.
 The four kernels span $1656\times$ in transition throughput and
 $196\times$ in trusted computing base, yet the slowest is
-0.71\% of one model call.
+0.71\% of a deliberately conservative 500\,ms model call, and
+0.07\% of the step latency we actually measured.
 Orchestration substrate is operationally necessary and no longer
 performance-dominant.
 \end{abstract}
@@ -309,8 +310,12 @@ obviously correct, not small.
 \texttt{awk}, no \texttt{sed}: the narrow dialect parses with parameter
 expansion alone. The first version extracted fields with
 \texttt{x=\$(fld \dots)}, which forks a subshell per field---about eight forks
-per event---and ran at 259 transitions/s. Assigning to a variable instead
-removed every fork after start-up and gave a $12\times$ speed-up. The kernel's
+per event. Assigning to a variable instead removes every fork after start-up.
+Measured back to back at 100{,}000 transitions each, the forking variant
+runs at 170transitions/s and the assigning one at 2798, a
+$16.5\times$ speed-up; both pass all 350conformance cases
+with no trace disagreement, so this is one kernel measured twice rather than
+two kernels. The kernel's
 throughput is entirely a question of whether field extraction forks.
 
 \paragraph{\texttt{sql} --- SQLite.} State is a row, $H$ is a table, and each
@@ -616,8 +621,9 @@ A & B & rate A & rate B & diff & 95\% CI & verdict & p (Holm) \\
 
 \begin{table}[h]\centering\small
 \caption{Local end-to-end tasks: 24graded shell tasks with real
-setup and real verifiers, $\times$ 4 substrates $\times$ 4models
-$\times$ 5repeats $=$ 1920runs. Grading is on environment state
+setup and real verifiers, across 4 substrates and 4models at
+3--7repeats per arm---the two arms that ran first ran more---for
+1920runs in total. Grading is on environment state
 by a verifier script, not on the agent's report.}
 \label{tab:localtask}
 \begin{tabular}{lrrrr}
@@ -697,8 +703,8 @@ Sample size was set by that rule rather than by taste, and the first attempt
 failed it. With 12 tasks at 3 repeats the paired bootstrap CI was wider than
 the band and three of the six pairs returned \emph{inconclusive}---a statement
 about the experiment, not about substrates. Doubling the suite to
-24tasks and raising repeats to 5narrowed the interval
-enough for a verdict. We report this because ``inconclusive'' is the outcome a
+24tasks and raising repeats to at least three per arm narrowed the
+interval enough for a verdict. We report this because ``inconclusive'' is the outcome a
 pre-registered band is for, and because the fix is more data rather than a
 wider band.
 
@@ -740,7 +746,7 @@ rate, so those are not simply the hard tasks being reshuffled into one column.
 
 Set that beside the substrate comparison on the same arm, where no pair
 differed by more than 0.052and none was ever judged different:
-\textbf{changing the model moved the outcome by roughly 4times as
+\textbf{changing the model moved the outcome by roughly 4.5times as
 much as changing the substrate did.} That is the paper's claim in one
 comparison, and it is measured rather than argued.
 
@@ -892,8 +898,8 @@ present it either as nothing or as a finding. It is \texttt{py} against
 \texttt{sh}, and Table~\ref{tab:tbperrep} shows where it comes from: the first
 two repeats put the two substrates within 0.017 of each other and disagree
 about which is ahead, and the whole of the pooled difference comes from the
-third. The 28 tasks the two disagree on split in both directions with no
-pattern. We read that as a single repeat's luck at a base rate near 0.5, where
+third. The 28 tasks the two disagree on split 18--10 in \texttt{sh}'s favour,
+which a sign test does not separate from chance ($p=0.19$). We read that as a single repeat's luck at a base rate near 0.5, where
 per-task variance is at its maximum---but we report the pooled number, the
 per-repeat decomposition and the non-significant test, and leave the reader to
 disagree.
@@ -924,12 +930,17 @@ Most of the change has a single identifiable cause, and it is a result about
 prompt design rather than a defect report. Protocol \texttt{a} instructed the
 model to emit an action and nothing else, and the model ran with reasoning
 disabled. Between them, those two choices leave the model no channel in which
-to notice that its last command failed---so it re-issues it. In one measured
-run, 25 actions contained 9 distinct commands, one of them repeated verbatim
-ten times. Across the arm the median run spent 80 of its 80 steps and halted
+to notice that its last command failed---so it re-issues it. In one run inspected live, 25 actions contained 9 distinct commands, one
+of them repeated verbatim ten times. That observation is not reproducible
+from the artifact and is not offered as evidence: the canonical trace is
+payload-blind by construction, so it records that an action was issued and
+under which reference, never the command text. The two claims that follow
+are recomputed from the traces and are. Across the arm the median run spent 80 of its 80 steps and halted
 voluntarily 12\% of the time. Protocol \texttt{b} changes one thing, requiring
-a short thought before the action, and the median falls to 15 steps with
-voluntary halts at 36\%.\footnote{Two integration details cost us runs and are
+a short thought before the action, and the median falls to 16 steps with
+voluntary halts at 36\%. Both figures are recomputed from the canonical
+traces by \texttt{alm/bench/trace\_stats.py} and published as
+\texttt{trace-stats.jsonl}, one row per trial.\footnote{Two integration details cost us runs and are
 recorded here for anyone wiring a reasoning model into a tool loop rather than
 as findings. First, \texttt{max\_tokens} covers reasoning tokens: a model can
 spend the whole allowance thinking and return empty content, which an adapter
@@ -1059,7 +1070,10 @@ witness ablations & grok-low & 1600 & 99.9\% & 0.0\% & 0.06\% & 4 & 5041 & 2817 
 Figure~\ref{fig:pareto} puts the two sizes and the outcomes on one plot.
 The four kernels span 1656$\times$ in transition throughput, and
 that spread is almost invisible end to end: the slowest kernel costs
-3561\,$\mu$s per transition, or 0.71\% of a 500\,ms model call,
+3561\,$\mu$s per transition. Against a deliberately conservative
+500\,ms model call that is 0.71\%; against the median step latency
+actually observed on Terminal-Bench (4.8\,s across 2408scored
+trials) it is 0.07\%,
 and measured orchestration time is 0.13\%of wall clock across every
 live run in this paper, against 98.8\%spent waiting for the model.
 This is the quantitative form of the paper's central negative result.
@@ -1078,7 +1092,10 @@ It is roughly $10^5$ bytes, and it is \emph{not} evidence for anything in
 them is the easiest way to make a minimality claim that is not true: a file
 with a memory system is not a minimal core, whatever language it is in.
 
-For context, and with the caveats stated where the numbers are: on the official
+For context, and with the caveats stated where the numbers are---including
+that these runs predate this study and their job directories were not
+kept, so unlike everything else here the figures cannot be recomputed from
+the artifact---on the official
 Terminal-Bench 2.1 suite (89 tasks, Harbor, official verifier, $k{=}1$, one
 shared model) \texttt{seed.sh} resolved 45/89 (mean 0.506), against 66/89
 (0.742) for mini-SWE-agent and 62/89 (0.697) for Terminus-2 under the same
@@ -1143,9 +1160,9 @@ are shown in that table rather than folded away.
 the substrate verdicts come from one of them, and the arm that established them
 first was retired mid-study on cost. Everything is reported per arm, but a
 single arm carried on one model throughout would have been cleaner.
-\item The largest single lesson here is negative and was expensive: 1275 trials
-were paid for before a trace was read carefully enough to notice the agent was
-re-issuing the same failed command. Cheap qualitative inspection should precede
+\item The largest single lesson here is negative and was expensive: 1301 trials
+were paid for---1263 of them reaching a verdict---before a trace was read
+carefully enough to notice the agent was re-issuing the same failed command. Cheap qualitative inspection should precede
 expensive quantitative runs, and in this study it did not.
 \item The witness families are designed to separate arms. They are evidence
 about the core, not an estimate of how often real tasks need feedback.
@@ -1173,7 +1190,7 @@ tightly than block interleaving would.
 
 Two deviations are on the record and neither was decided by looking at an
 outcome. The first arm's amendment promised five repeats and was stopped after
-four and 82\% of the fifth, on cost. One repeat of the second arm was discarded
+four repeats and 233 of the fifth repeat's 267 trials (87\%), on cost. One repeat of the second arm was discarded
 and re-run after the host filled its disk mid-arm: that repeat recorded
 seventeen infrastructure faults against the neighbouring repeat's four, and the
 discarded directories are kept beside the replacements so the claim can be
@@ -1206,8 +1223,16 @@ neither, and the parts that are paying can be named.
 
 Specification, four kernels, conformance suite, witness families, statistics
 and the generated result tables: \url{https://github.com/Leehow/seed} under
-\texttt{alm/}. Every table in this paper is generated from a results file by
-\texttt{alm/paper\_tables.py}; no number is transcribed by hand.
+\texttt{alm/}. Every table and every macro in this paper is generated from a
+results file by \texttt{alm/paper\_tables.py}, which refuses to build if the
+text uses a macro no results file defines. Three numbers in the running text
+are not covered by that: the \S\ref{sec:seed} comparison against
+mini-SWE-agent and Terminus-2, whose runs predate this study and whose job
+directories were not kept; and the duplicate-command observation in
+\S\ref{sec:tb}, which the payload-blind trace cannot record. Each is marked
+where it appears. The per-trial trace statistics behind the step-count claims
+are published as \texttt{alm/bench/trace-stats.jsonl}; the raw job trees they
+are derived from are several gigabytes and are not.
 
 \appendix
 \section{Rule coverage of the conformance suite}

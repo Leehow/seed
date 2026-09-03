@@ -1,4 +1,21 @@
 #!/bin/sh
+# museed-forking.sh -- NOT one of the four kernels. Do not add it to
+# registry.json except to re-run the measurement below, and remove it again
+# afterwards: measure.py writes systems/results.json from the registry, and a
+# fifth entry would silently change the throughput spread the paper quotes.
+#
+# This is museed.sh with one change: every ABI field is extracted with
+# `V=$(fld ...)` instead of by assignment, which forks a subshell per field.
+# It exists so the claim "removing the forks is worth 16x" is a measurement
+# rather than a recollection. It passes all 350 conformance cases with zero
+# cross-kernel trace disagreements, so it is the same kernel, extracted
+# differently. Result: systems/variant-shfork.json.
+#
+# To reproduce:
+#   add {"shfork": {"argv": ["/bin/sh", "KERNELS/museed-forking.sh"], ...}}
+#   python3 alm/conformance/run.py --kernels shfork
+#   python3 alm/systems/measure.py --kernels shfork,sh --transitions 100000
+#
 # museed.sh -- ALM v0.1 kernel in POSIX shell (mu-Seed-Shell).
 #
 # Same kappa as kernels/museed.py, no jq, no awk, no sed: the ABI's canonical
@@ -32,10 +49,10 @@ STEPS_USED=0
 #
 # It assigns rather than printing on purpose: `x=$(fld ...)` forks a subshell
 # per field, which costs about eight forks per event and drops this kernel's
-# throughput by 16x (measured: systems/variant-shfork.json). Parameter expansion alone means the
+# throughput by three orders of magnitude. Parameter expansion alone means the
 # shell kernel never forks after start-up.
 fld() {
-    FLD=''
+    :
     case "$1" in
         *"\"$2\":"*) : ;;
         *) return 0 ;;
@@ -45,7 +62,7 @@ fld() {
     v=${v%\}}
     v=${v#\"}
     v=${v%\"}
-    FLD=$v
+    printf '%s' "$v"
 }
 
 hist_add() { # keep H bounded when the budget bounds what the model can see
@@ -111,9 +128,9 @@ while IFS= read -r line; do
     [ -n "$line" ] || continue
     case $line in '{'*) : ;; *) continue ;; esac
 
-    fld "$line" t;      T=$FLD
-    fld "$line" eid;    EID=$FLD
-    fld "$line" status; STATUS=$FLD
+    T=$(fld "$line" t)
+    EID=$(fld "$line" eid)
+    STATUS=$(fld "$line" status)
     [ -n "$STATUS" ] || STATUS=-
     PHASE_IN=$PHASE
     STEP_IN=$STEP
@@ -131,8 +148,8 @@ while IFS= read -r line; do
             [ "$PHASE" = await_model ] || stale=1
             case $STATUS in
                 invalid|transport_error) : ;;
-                ok) fld "$line" action
-                    case $FLD in tool|halt) : ;; *) stale=1 ;; esac ;;
+                ok) A_=$(fld "$line" action)
+                    case $A_ in tool|halt) : ;; *) stale=1 ;; esac ;;
                 *) stale=1 ;;
             esac ;;
         tool_response)
@@ -146,15 +163,15 @@ while IFS= read -r line; do
     fi
 
     if [ "$T" = model_response ]; then
-        fld "$line" action;  ACTION=$FLD
-        fld "$line" arg_ref; ARG=$FLD
+        ACTION=$(fld "$line" action)
+        ARG=$(fld "$line" arg_ref)
         [ -n "$ARG" ] || ARG=r0
 
         if [ "$STATUS" = ok ] && [ "$ACTION" = tool ]; then
             hist_add "$ARG"
             PHASE=await_tool
-            fld "$line" tool
-            send_tool_request "$FLD" "$ARG"
+            TL_=$(fld "$line" tool)
+            send_tool_request "$TL_" "$ARG"
             rec "$STEP_IN" "$PHASE_IN" model_response ok tool "$REFS" -
             continue
         fi
@@ -162,7 +179,7 @@ while IFS= read -r line; do
         if [ "$STATUS" = ok ] && [ "$ACTION" = halt ]; then
             if [ "$ALLOW_HALT" -eq 1 ]; then
                 hist_add "$ARG"
-                fld "$line" halt; H=$FLD; [ -n "$H" ] || H=ok
+                H=$(fld "$line" halt); [ -n "$H" ] || H=ok
                 send_final halted model_halt "$H"
                 rec "$STEP_IN" "$PHASE_IN" model_response ok halt - -
                 continue
@@ -203,7 +220,7 @@ while IFS= read -r line; do
 
     # tool_response
     if [ "$FEEDBACK" -eq 1 ]; then
-        fld "$line" obs_ref; O=$FLD; [ -n "$O" ] || O=o0
+        O=$(fld "$line" obs_ref); [ -n "$O" ] || O=o0
         hist_add "$O"
     fi
     STEPS_LEFT=$((STEPS_LEFT - 1))

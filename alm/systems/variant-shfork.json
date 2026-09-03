@@ -1,0 +1,35 @@
+{
+ "what": "Paired measurement of the one optimisation that mattered in the shell kernel: extracting an ABI field by assignment (`fld` sets a variable) against by command substitution (`x=$(fld ...)`), which forks a subshell per field. Both variants pass all 350 conformance cases with zero cross-kernel trace disagreements, so this is the same kernel measured twice, not two kernels.",
+ "why_separate": "Kept out of systems/results.json on purpose. The forking variant is not one of the four kernels and must not enter the throughput spread or the slowest-kernel figures.",
+ "conformance": {
+  "cases": 350,
+  "failures": 0,
+  "trace_disagreements": 0
+ },
+ "measured": {
+  "forking": {
+   "transitions": 100000,
+   "wall_s": 585.828,
+   "per_transition_us": 5858.277,
+   "transitions_per_s": 170,
+   "peak_rss_bytes": 2539520
+  },
+  "assignment": {
+   "transitions": 100000,
+   "wall_s": 35.738,
+   "per_transition_us": 357.376,
+   "transitions_per_s": 2798,
+   "peak_rss_bytes": 2572288
+  },
+  "startup_p50_ms": {
+   "forking": 10.535,
+   "assignment": 6.135
+  }
+ },
+ "speedup": 16.5,
+ "host": {
+  "platform": "macOS-26.6.2-arm64-arm-64bit-Mach-O",
+  "machine": "arm64"
+ },
+ "recorded": "2026-09-02"
+}

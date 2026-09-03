@@ -44,3 +44,8 @@ AGENTS.md
 # ARM64 assembly agent build output
 experiments/asm-agent/agent
 experiments/asm-agent/*.dSYM/
+
+# tectonic build products
+paper/*.log
+paper/*.blg
+paper/*.aux
